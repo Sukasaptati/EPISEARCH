@@ -38,6 +38,9 @@ android {
 }
 
 dependencies {
+    // Tesseara4Android for Text Recognition (Offline)
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.7.0")    // CameraX (Optional, but makes camera handling easier, or we use simple Intents)
+    // We will use simple Intents to keep the app small.
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
