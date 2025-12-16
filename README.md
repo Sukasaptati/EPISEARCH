@@ -19,8 +19,13 @@ If you no longer need the image, you can click the "X" in the upper right corner
 
 The databases are stored at Android/Data/com.example.latininscription/files
 
+Offline translation is available via Google Translate App's offline mode. Install Goolge Trasnlate on your phone and download Latin and Greek language packs. You can choose online or offline mode of translation in the setting menu (in the top right of the window).
+
 ![Screenshot_2025-12-15-12-40-03-93_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/2a77f211-9176-4972-b5f3-94f06b46512e)
 ![Screenshot_2025-12-15-12-39-31-80_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/e7ce2796-6dfe-437b-b13d-f25b52638032)
 ![Screenshot_2025-12-15-12-39-24-52_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/c53f29fc-8626-457a-b41e-8d98fe68981b)
 ![Screenshot_2025-12-15-12-39-12-48_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/d7a3b932-5c87-4cef-93b4-3bafa64bc88a)
 ![Screenshot_2025-12-15-12-38-00-25_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/1439c319-c606-49df-bd62-557f5180e291)
+![Screenshot_2025-12-16-19-08-31-07_7a5391456ddf15713cd09dfbd75e8325](https://github.com/user-attachments/assets/91c90f73-d26d-4655-aed7-50d76cd8214a)
+![Screenshot_2025-12-16-19-07-44-40_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/4b6b5a53-8b95-4028-9dca-2a47d64d64ac)
+![Screenshot_2025-12-16-19-07-35-93_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/99014ffe-3c0e-4a7c-a356-a85012814c74)
