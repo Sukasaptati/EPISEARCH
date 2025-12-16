@@ -13,7 +13,7 @@ Use the dropdown menu at the top to choose databases. It takes a few seconds to 
 
 Use the first search bar to look for inscriptions that contain the keywords you want, and the second one for inscriptions without the keywords. Separate multiple keywords with '&&'. Keywords will be highlighted in red in the search results.
 
-The scan button allows you to take a photo or load a local image for OCR (app camera permissions are required, otherwise the app will crash). The pop-up menu in the upper right corner allows you to choose between offline and online recognition. Offline recognition uses the Tessera library, and it converts the image to black and white before recognition to reduce background noise (currently, the recognition quality is poor). Online recognition uses Google's Cloud Vision API, offering much better results; free to use for 1000 times every month. The API can be obtained from the Google Cloud console.You can enter the API key in the upper right menu.
+The scan button allows you to take a photo or load a local image for OCR (app camera permissions are required, otherwise the app will crash). The pop-up menu in the upper right corner allows you to choose between offline and online recognition. Offline recognition uses the Tessera library, and it converts the image to black and white before recognition to reduce background noise (currently, the recognition quality is poor). Online recognition uses Google's Cloud Vision API, offering much better results; free to use for 1000 times every month. The API can be obtained from the Google Cloud console.You can set the API key in the upper right menu.
 
 If you no longer need the image, you can click the "X" in the upper right corner of the image. You can also save the image if you want.
 
