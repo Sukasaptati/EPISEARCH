@@ -38,6 +38,7 @@ import java.io.InputStreamReader
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.net.URL
+import java.net.URLEncoder // <--- IMPORT THIS
 import javax.net.ssl.HttpsURLConnection
 
 class MainActivity : AppCompatActivity() {
@@ -46,7 +47,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: InscriptionsAdapter
     private var lastResults: List<Inscription> = emptyList()
 
-    // UI Variables
     private lateinit var etInclude: EditText
     private lateinit var etExclude: EditText
     private lateinit var progressBar: ProgressBar
@@ -54,14 +54,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var layoutOcrResult: LinearLayout
     private lateinit var ivPreview: ImageView
     private lateinit var tvOcrText: TextView
+    private lateinit var tvTranslation: TextView 
 
-    // OCR Variables
     private lateinit var tessApi: TessBaseAPI
     private var isTesseractReady = false
     private var useOnlineOcr = false
+    private var useOnlineTranslation = false 
     private var currentBitmap: Bitmap? = null
-
-    // Storage for API Key
     private lateinit var prefs: SharedPreferences
 
     private val galleryLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -101,17 +100,16 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Init Preferences
         prefs = getSharedPreferences("EDCS_PREFS", Context.MODE_PRIVATE)
 
-        // 1. SETUP TOOLBAR & MENU
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         toolbar.inflateMenu(R.menu.menu_main)
         
-        // Restore previous OCR setting
         useOnlineOcr = prefs.getBoolean("USE_ONLINE_OCR", false)
-        val modeItem = toolbar.menu.findItem(R.id.action_ocr_mode)
-        modeItem.isChecked = useOnlineOcr
+        useOnlineTranslation = prefs.getBoolean("USE_ONLINE_TRANS", false)
+        
+        toolbar.menu.findItem(R.id.action_ocr_mode).isChecked = useOnlineOcr
+        toolbar.menu.findItem(R.id.action_online_translation).isChecked = useOnlineTranslation
 
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
@@ -119,8 +117,14 @@ class MainActivity : AppCompatActivity() {
                     useOnlineOcr = !useOnlineOcr
                     item.isChecked = useOnlineOcr
                     prefs.edit().putBoolean("USE_ONLINE_OCR", useOnlineOcr).apply()
-                    val mode = if (useOnlineOcr) "Online (Google)" else "Offline (Tesseract)"
-                    Toast.makeText(this, "Switched to $mode", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "OCR: ${if (useOnlineOcr) "Online" else "Offline"}", Toast.LENGTH_SHORT).show()
+                    true
+                }
+                R.id.action_online_translation -> {
+                    useOnlineTranslation = !useOnlineTranslation
+                    item.isChecked = useOnlineTranslation
+                    prefs.edit().putBoolean("USE_ONLINE_TRANS", useOnlineTranslation).apply()
+                    Toast.makeText(this, "Translation: ${if (useOnlineTranslation) "Online" else "App (Offline)"}", Toast.LENGTH_SHORT).show()
                     true
                 }
                 R.id.action_set_api_key -> {
@@ -131,7 +135,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Init Views
         etInclude = findViewById(R.id.etInclude)
         etExclude = findViewById(R.id.etExclude)
         val btnSearch = findViewById<Button>(R.id.btnSearch)
@@ -144,19 +147,28 @@ class MainActivity : AppCompatActivity() {
         layoutOcrResult = findViewById(R.id.layoutOcrResult)
         ivPreview = findViewById(R.id.ivPreview)
         tvOcrText = findViewById(R.id.tvOcrText)
+        tvTranslation = findViewById(R.id.tvTranslation)
 
-        // OCR Close Button
         findViewById<ImageButton>(R.id.btnCloseOcr).setOnClickListener {
             layoutOcrResult.visibility = View.GONE
+            tvTranslation.visibility = View.GONE
             ivPreview.setImageDrawable(null)
             tvOcrText.text = ""
             currentBitmap = null
         }
 
-        // SAVE IMAGE BUTTON
         findViewById<ImageButton>(R.id.btnSaveImage).setOnClickListener {
             currentBitmap?.let { bmp -> saveImageToGallery(bmp) } 
                 ?: Toast.makeText(this, "No image to save", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<ImageButton>(R.id.btnTranslate).setOnClickListener {
+            val text = tvOcrText.text.toString()
+            if (text.isNotBlank() && text != "Scanned text...") {
+                translateText(text)
+            } else {
+                Toast.makeText(this, "No text to translate", Toast.LENGTH_SHORT).show()
+            }
         }
 
         initializeTesseract()
@@ -165,17 +177,34 @@ class MainActivity : AppCompatActivity() {
         val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, dbOptions.map { it.displayName })
         spinner.adapter = spinnerAdapter
         rvResults.layoutManager = LinearLayoutManager(this)
-        adapter = InscriptionsAdapter()
+        
+        adapter = InscriptionsAdapter { fullText ->
+            showTextSelectionDialog(fullText)
+        }
         rvResults.adapter = adapter
 
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selectedDb = dbOptions[position]
                 progressBar.visibility = View.VISIBLE
+                tvStatus.text = "Loading..."
+                btnSearch.isEnabled = false
+
                 CoroutineScope(Dispatchers.Main).launch {
-                    parser.loadDatabase(selectedDb)
-                    progressBar.visibility = View.GONE
-                    tvStatus.text = "Ready: ${selectedDb.displayName}"
+                    try {
+                        parser.loadDatabase(selectedDb)
+                        progressBar.visibility = View.GONE
+                        tvStatus.text = "Ready: ${selectedDb.displayName}"
+                        btnSearch.isEnabled = true
+                    } catch (e: Exception) {
+                        progressBar.visibility = View.GONE
+                        tvStatus.text = "Error Loading DB"
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Database Missing")
+                            .setMessage(e.message)
+                            .setPositiveButton("OK", null)
+                            .show()
+                    }
                 }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -188,9 +217,6 @@ class MainActivity : AppCompatActivity() {
             val excludeRaw = excludeText.split("&&").map { it.trim() }.filter { it.isNotBlank() }
 
             if (includeRaw.isEmpty()) return@setOnClickListener
-
-            // --- CHANGE: I REMOVED THE LINE THAT HIDES THE IMAGE ---
-            // layoutOcrResult.visibility = View.GONE  <-- DELETED
 
             progressBar.visibility = View.VISIBLE
             val selectedDb = dbOptions[spinner.selectedItemPosition]
@@ -218,19 +244,166 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener { saveFileLauncher.launch("Output.txt") }
     }
 
-    // --- NEW: Dialog to Set API Key ---
+    // --- TRANSLATION LOGIC ---
+    private fun translateText(text: String) {
+        // 1. Resolve tags: <x=CS> becomes x
+        var cleaned = text.replace(Regex("<(\\p{L}+)=\\p{L}+>"), "$1")
+        
+        // 2. Remove all brackets: () [] {} <> 
+        cleaned = cleaned.replace(Regex("[\\(\\)\\[\\]\\{\\}<>]"), "")
+        
+        // 3. Remove question marks
+        cleaned = cleaned.replace("?", "")
+
+        if (cleaned.isBlank()) {
+             Toast.makeText(this, "No text to translate", Toast.LENGTH_SHORT).show()
+             return
+        }
+
+        val spinner = findViewById<Spinner>(R.id.spinnerDatabase)
+        val isGreek = spinner.selectedItem.toString().contains("Greek")
+        val sourceLang = if (isGreek) "el" else "la"
+
+        if (useOnlineTranslation) {
+            runOnlineTranslation(cleaned, sourceLang)
+        } else {
+            runOfflineTranslationIntent(cleaned, sourceLang)
+        }
+    }
+
+    // --- FIX IS HERE: ENCODE THE TEXT ---
+    private fun runOfflineTranslationIntent(text: String, lang: String) {
+        try {
+            // Encode spaces and special chars (e.g., " " -> "%20")
+            val encodedText = URLEncoder.encode(text, "UTF-8")
+            
+            val intent = Intent(Intent.ACTION_VIEW)
+            intent.data = Uri.parse("http://translate.google.com/m/translate?client=android-translate&q=$encodedText&sl=$lang&tl=en")
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Google Translate App not found.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun runOnlineTranslation(text: String, sourceLang: String) {
+        val apiKey = prefs.getString("GOOGLE_API_KEY", "") ?: ""
+        if (apiKey.isEmpty()) {
+            Toast.makeText(this, "API Key missing! Set it in Menu.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val loadingDialog = AlertDialog.Builder(this).setMessage("Translating...").show()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val jsonRequest = JSONObject()
+                jsonRequest.put("q", text)
+                jsonRequest.put("source", sourceLang)
+                jsonRequest.put("target", "en")
+                jsonRequest.put("format", "text")
+
+                val url = URL("https://translation.googleapis.com/language/translate/v2?key=$apiKey")
+                val conn = url.openConnection() as HttpsURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.doOutput = true
+
+                val writer = OutputStreamWriter(conn.outputStream)
+                writer.write(jsonRequest.toString())
+                writer.flush()
+                writer.close()
+
+                if (conn.responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                    val response = reader.readText()
+                    reader.close()
+                    
+                    val jsonResponse = JSONObject(response)
+                    val translatedText = jsonResponse.getJSONObject("data")
+                        .getJSONArray("translations")
+                        .getJSONObject(0)
+                        .getString("translatedText")
+
+                    withContext(Dispatchers.Main) { 
+                        loadingDialog.dismiss()
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Translation")
+                            .setMessage(translatedText)
+                            .setPositiveButton("Copy") { _, _ ->
+                                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clip = android.content.ClipData.newPlainText("Translation", translatedText)
+                                clipboard.setPrimaryClip(clip)
+                            }
+                            .setNegativeButton("Close", null)
+                            .show()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) { 
+                        loadingDialog.dismiss()
+                        Toast.makeText(this@MainActivity, "Error: ${conn.responseCode}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { 
+                    loadingDialog.dismiss()
+                    Toast.makeText(this@MainActivity, "Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun showTextSelectionDialog(text: String) {
+        val textView = TextView(this)
+        textView.text = text
+        textView.textSize = 20f 
+        textView.setPadding(50, 50, 50, 50)
+        textView.setTextColor(Color.BLACK)
+        textView.setTextIsSelectable(true) 
+
+        textView.customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
+            override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
+                menu.add(0, 100, 0, "EDCS Translate")
+                return true
+            }
+            override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = false
+            override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem): Boolean {
+                if (item.itemId == 100) {
+                    var min = 0
+                    var max = textView.text.length
+                    if (textView.isFocused) {
+                        val selStart = textView.selectionStart
+                        val selEnd = textView.selectionEnd
+                        min = maxOf(0, minOf(selStart, selEnd))
+                        max = maxOf(0, maxOf(selStart, selEnd))
+                    }
+                    val selectedText = textView.text.subSequence(min, max).toString()
+                    if (selectedText.isNotBlank()) {
+                        translateText(selectedText)
+                    }
+                    mode.finish()
+                    return true
+                }
+                return false
+            }
+            override fun onDestroyActionMode(mode: android.view.ActionMode) {}
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Select Text")
+            .setView(textView)
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
     private fun showApiKeyDialog() {
         val input = EditText(this)
         input.hint = "Paste Google API Key here"
-        val currentKey = prefs.getString("GOOGLE_API_KEY", "")
-        input.setText(currentKey)
-
+        input.setText(prefs.getString("GOOGLE_API_KEY", ""))
         AlertDialog.Builder(this)
             .setTitle("Set API Key")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
-                val newKey = input.text.toString().trim()
-                prefs.edit().putString("GOOGLE_API_KEY", newKey).apply()
+                prefs.edit().putString("GOOGLE_API_KEY", input.text.toString().trim()).apply()
                 Toast.makeText(this, "Key Saved!", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
@@ -254,16 +427,15 @@ class MainActivity : AppCompatActivity() {
         currentBitmap = safeBitmap
 
         layoutOcrResult.visibility = View.VISIBLE
+        tvTranslation.visibility = View.GONE
         progressBar.visibility = View.VISIBLE
         
         if (useOnlineOcr) {
-            // ONLINE MODE (Google Cloud Vision)
             ivPreview.setImageBitmap(safeBitmap) 
             tvStatus.text = "Sending to Google Cloud..."
             tvOcrText.text = "Uploading..."
             runCloudVision(safeBitmap)
         } else {
-            // OFFLINE MODE (Tesseract)
             tvStatus.text = "Optimizing Image..."
             CoroutineScope(Dispatchers.Default).launch {
                 val binarizedBitmap = applyAdaptiveThreshold(safeBitmap)
@@ -277,13 +449,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun runCloudVision(bitmap: Bitmap) {
-        // Retrieve Key from Settings
         val apiKey = prefs.getString("GOOGLE_API_KEY", "") ?: ""
-
         if (apiKey.isEmpty()) {
             Toast.makeText(this, "Please set API Key in Menu!", Toast.LENGTH_LONG).show()
-            tvStatus.text = "API Key Missing"
-            tvOcrText.text = "Click the 3 dots (Menu) -> Set Google API Key."
+            tvOcrText.text = "Error: Missing API Key."
             progressBar.visibility = View.GONE
             return
         }
@@ -294,16 +463,7 @@ class MainActivity : AppCompatActivity() {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
                 val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
 
-                val jsonRequest = """
-                    {
-                      "requests": [
-                        {
-                          "image": { "content": "$base64Image" },
-                          "features": [ { "type": "DOCUMENT_TEXT_DETECTION" } ]
-                        }
-                      ]
-                    }
-                """.trimIndent()
+                val jsonRequest = """{ "requests": [ { "image": { "content": "$base64Image" }, "features": [ { "type": "DOCUMENT_TEXT_DETECTION" } ] } ] }"""
 
                 val url = URL("https://vision.googleapis.com/v1/images:annotate?key=$apiKey")
                 val conn = url.openConnection() as HttpsURLConnection
@@ -316,22 +476,16 @@ class MainActivity : AppCompatActivity() {
                 writer.flush()
                 writer.close()
 
-                val responseCode = conn.responseCode
-                if (responseCode == 200) {
+                if (conn.responseCode == 200) {
                     val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                    val response = StringBuilder()
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        response.append(line)
-                    }
+                    val response = reader.readText()
                     reader.close()
-
-                    val jsonResponse = JSONObject(response.toString())
+                    val jsonResponse = JSONObject(response)
                     val responsesArray = jsonResponse.getJSONArray("responses")
                     if (responsesArray.length() > 0) {
-                        val firstResponse = responsesArray.getJSONObject(0)
-                        if (firstResponse.has("fullTextAnnotation")) {
-                            val text = firstResponse.getJSONObject("fullTextAnnotation").getString("text")
+                        val first = responsesArray.getJSONObject(0)
+                        if (first.has("fullTextAnnotation")) {
+                            val text = first.getJSONObject("fullTextAnnotation").getString("text")
                             withContext(Dispatchers.Main) {
                                 tvOcrText.text = text
                                 tvStatus.text = "Google OCR Complete"
@@ -339,25 +493,20 @@ class MainActivity : AppCompatActivity() {
                             }
                         } else {
                              withContext(Dispatchers.Main) {
-                                tvOcrText.text = "No text found by Google."
-                                tvStatus.text = "Completed (No Text)"
+                                tvOcrText.text = "No text found."
                                 progressBar.visibility = View.GONE
                             }
                         }
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        tvOcrText.text = "Server Error: $responseCode. Check your Key/Billing."
-                        tvStatus.text = "Google API Failed"
+                        tvOcrText.text = "Error: ${conn.responseCode}"
                         progressBar.visibility = View.GONE
                     }
                 }
-
             } catch (e: Exception) {
-                e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     tvOcrText.text = "Error: ${e.message}"
-                    tvStatus.text = "Network Error"
                     progressBar.visibility = View.GONE
                 }
             }
@@ -383,11 +532,9 @@ class MainActivity : AppCompatActivity() {
             }
             fos?.use {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 100, it)
-                Toast.makeText(this, "Image Saved to Gallery", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Image Saved", Toast.LENGTH_SHORT).show()
             }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to save: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
+        } catch (e: Exception) { }
     }
 
     private fun scaleBitmapDown(bitmap: Bitmap, maxDimension: Int): Bitmap {
@@ -461,11 +608,8 @@ class MainActivity : AppCompatActivity() {
 
                 val success = tessApi.init(getExternalFilesDir(null)?.absolutePath, "grc+lat")
                 withContext(Dispatchers.Main) {
-                    if (success) {
-                        isTesseractReady = true
-                    } else {
-                        tvStatus.text = "OCR Init Failed"
-                    }
+                    if (success) isTesseractReady = true
+                    else tvStatus.text = "OCR Init Failed"
                 }
             } catch (e: Exception) { e.printStackTrace() }
         }
@@ -495,7 +639,6 @@ class MainActivity : AppCompatActivity() {
                     tvOcrText.text = if (result.isBlank()) "No text found." else result
                 }
             } catch (e: Exception) { 
-                e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     progressBar.visibility = View.GONE
                     tvOcrText.text = "Error: ${e.message}"

@@ -5,15 +5,15 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-<androidx.appcompat.widget.Toolbar
+    <androidx.appcompat.widget.Toolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorPrimary"
+        android:background="#6200EE"
         android:elevation="4dp"
         app:title="EPISEARCH"
-        app:titleTextColor="?android:attr/textColorPrimary"
-        app:subtitleTextColor="?android:attr/textColorSecondary"
+        app:titleTextColor="#FFFFFF"
+        app:subtitleTextColor="#FFFFFF"
         app:popupTheme="@style/ThemeOverlay.AppCompat.DayNight" />
 
     <LinearLayout
@@ -41,8 +41,6 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Scan"
-                android:backgroundTint="#6200EE"
-                android:textColor="#FFFFFF"
                 android:layout_marginStart="8dp"/>
         </LinearLayout>
 
@@ -50,7 +48,6 @@
             android:id="@+id/etInclude"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
             android:hint="Include (&amp;&amp;)"
             android:textSize="14sp"/>
 
@@ -160,7 +157,14 @@
                                 android:layout_height="32dp"
                                 android:src="@android:drawable/ic_menu_save"
                                 android:background="?attr/selectableItemBackgroundBorderless"
-                                android:contentDescription="Save Image"
+                                android:layout_marginEnd="16dp"/>
+                            
+                            <ImageButton
+                                android:id="@+id/btnTranslate"
+                                android:layout_width="32dp"
+                                android:layout_height="32dp"
+                                android:src="@android:drawable/ic_menu_sort_by_size"
+                                android:background="?attr/selectableItemBackgroundBorderless"
                                 android:layout_marginEnd="16dp"/>
 
                             <ImageButton
@@ -168,8 +172,7 @@
                                 android:layout_width="32dp"
                                 android:layout_height="32dp"
                                 android:src="@android:drawable/ic_menu_close_clear_cancel"
-                                android:background="?attr/selectableItemBackgroundBorderless"
-                                android:contentDescription="Close OCR" />
+                                android:background="?attr/selectableItemBackgroundBorderless" />
                         </LinearLayout>
                     </RelativeLayout>
 
@@ -190,6 +193,23 @@
                         android:padding="16dp"
                         android:textSize="14sp"
                         android:hint="Scanned text..." />
+                    
+                    <TextView
+                        android:id="@+id/tvTranslation"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:background="#E3F2FD" 
+                        android:padding="16dp"
+                        android:textSize="14sp"
+                        android:textColor="#0D47A1"
+                        android:textStyle="italic"
+                        android:hint="Translation will appear here..."
+                        android:visibility="gone"/>
+
                 </LinearLayout>
 
-            </LinearLayout> </ScrollView> </LinearLayout> </LinearLayout> 
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+</LinearLayout>

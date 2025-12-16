@@ -10,70 +10,69 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import java.util.Locale
+import java.util.regex.Pattern
 
-class InscriptionsAdapter : RecyclerView.Adapter<InscriptionsAdapter.InscriptionViewHolder>() {
+class InscriptionsAdapter(
+    private val onItemLongClick: (String) -> Unit
+) : ListAdapter<Inscription, InscriptionsAdapter.ViewHolder>(DiffCallback()) {
 
-    private var items: List<Inscription> = emptyList()
-    private var currentSearchTerms: List<String> = emptyList()
+    private var highlightTerms: List<String> = emptyList()
 
-    fun submitList(newItems: List<Inscription>, searchTerms: List<String>) {
-        this.items = newItems
-        this.currentSearchTerms = searchTerms
-        notifyDataSetChanged()
+    fun submitList(list: List<Inscription>, highlights: List<String>) {
+        this.highlightTerms = highlights
+        super.submitList(list)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): InscriptionViewHolder {
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_inscription, parent, false)
-        return InscriptionViewHolder(view)
+        return ViewHolder(view)
     }
 
-    override fun onBindViewHolder(holder: InscriptionViewHolder, position: Int) {
-        holder.bind(items[position], currentSearchTerms)
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val item = getItem(position)
+        holder.bind(item, highlightTerms, onItemLongClick)
     }
 
-    override fun getItemCount(): Int = items.size
-
-    class InscriptionViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        private val tvHeader: TextView = itemView.findViewById(R.id.tvHeader)
+    class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val tvId: TextView = itemView.findViewById(R.id.tvId)
+        private val tvLocation: TextView = itemView.findViewById(R.id.tvLocation)
         private val tvDate: TextView = itemView.findViewById(R.id.tvDate)
-        private val tvLatinText: TextView = itemView.findViewById(R.id.tvLatinText)
-        private val tvReferences: TextView = itemView.findViewById(R.id.tvReferences)
+        private val tvText: TextView = itemView.findViewById(R.id.tvText)
+        private val tvRef: TextView = itemView.findViewById(R.id.tvRef)
 
-        fun bind(item: Inscription, searchTerms: List<String>) {
-            tvHeader.text = "${item.id}  |  ${item.location}"
+        fun bind(item: Inscription, highlights: List<String>, onItemLongClick: (String) -> Unit) {
+            tvId.text = item.id
+            tvLocation.text = item.location
+            tvDate.text = item.date
+            tvDate.visibility = if (item.date.isBlank()) View.GONE else View.VISIBLE
             
-            if (item.date.isNotBlank()) {
-                tvDate.visibility = View.VISIBLE
-                tvDate.text = item.date
-            } else {
-                tvDate.visibility = View.GONE
-            }
-
-            val fullText = item.text
-            val spannable = SpannableString(fullText)
-
-            for (term in searchTerms) {
+            // Highlight Logic (Red & Bold)
+            val spannable = SpannableString(item.text)
+            for (term in highlights) {
                 if (term.isBlank()) continue
-                try {
-                    val regex = Regex(term, RegexOption.IGNORE_CASE)
-                    val matches = regex.findAll(fullText)
-                    for (match in matches) {
-                        spannable.setSpan(ForegroundColorSpan(Color.RED), match.range.first, match.range.last + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                        spannable.setSpan(StyleSpan(Typeface.BOLD), match.range.first, match.range.last + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    }
-                } catch (e: Exception) {}
+                val p = Pattern.compile(Pattern.quote(term), Pattern.CASE_INSENSITIVE)
+                val m = p.matcher(item.text)
+                while (m.find()) {
+                    spannable.setSpan(ForegroundColorSpan(Color.RED), m.start(), m.end(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    spannable.setSpan(StyleSpan(Typeface.BOLD), m.start(), m.end(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
             }
-            tvLatinText.text = spannable
+            tvText.text = spannable
+            tvRef.text = "${item.ref1} ${item.ref2}"
 
-            val refs = listOf(item.ref1, item.ref2).filter { it.isNotBlank() }.joinToString(" | ")
-            if (refs.isNotBlank()) {
-                tvReferences.visibility = View.VISIBLE
-                tvReferences.text = refs
-            } else {
-                tvReferences.visibility = View.GONE
+            // Long Click triggers the popup in MainActivity
+            itemView.setOnLongClickListener {
+                onItemLongClick(item.text)
+                true
             }
         }
+    }
+
+    class DiffCallback : DiffUtil.ItemCallback<Inscription>() {
+        override fun areItemsTheSame(oldItem: Inscription, newItem: Inscription) = oldItem.id == newItem.id
+        override fun areContentsTheSame(oldItem: Inscription, newItem: Inscription) = oldItem == newItem
     }
 }

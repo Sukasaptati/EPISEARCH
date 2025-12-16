@@ -9,6 +9,12 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_online_translation"
+        android:title="Use Online Translation"
+        android:checkable="true"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_set_api_key"
         android:title="Set Google API Key"
         app:showAsAction="never" />
