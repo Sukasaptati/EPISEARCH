@@ -8,6 +8,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.InputStreamReader
+import java.util.regex.Pattern
 import java.util.zip.ZipInputStream
 
 data class Inscription(
@@ -28,9 +29,7 @@ class InscriptionParser(private val context: Context) {
         GREEK_PAPY("greek papyrus.txt", "Greek Papyri")
     }
 
-    private var rawRecords: ArrayList<String> = ArrayList()
-    private var cleanRecords: ArrayList<String> = ArrayList()
-    private var currentType: DatabaseType? = null
+    // MEMORY FIX: No ArrayLists here. We do not store the file in RAM.
 
     private val tagRegex = Regex("<(\\p{L}+)=\\p{L}+>")
     private val cleanupRegex = Regex("[\\\\[\\\\])(}{/<>,\\-]")
@@ -39,105 +38,116 @@ class InscriptionParser(private val context: Context) {
         return raw.replace(tagRegex, "$1").replace(cleanupRegex, "")
     }
 
+    // 1. LIGHTWEIGHT LOAD
+    // We only check if the file exists. We do NOT read it into memory yet.
     suspend fun loadDatabase(dbType: DatabaseType) = withContext(Dispatchers.IO) {
-        if (currentType == dbType && rawRecords.isNotEmpty()) return@withContext
-
-        rawRecords.clear(); cleanRecords.clear()
-        System.gc()
-
-        val file = File(context.getExternalFilesDir(null), dbType.filename)
-
+        // Use filesDir (Internal Storage) for safety
+        val file = File(context.filesDir, dbType.filename) 
+        
         if (!file.exists()) {
-            throw FileNotFoundException("File not found!\nPlease copy '${dbType.filename}' to:\nAndroid/data/com.example.latininscription/files/")
+             // Fallback to check external just in case user didn't re-import yet
+             val extFile = File(context.getExternalFilesDir(null), dbType.filename)
+             if (!extFile.exists()) {
+                 throw FileNotFoundException("File not found: ${dbType.filename}\nPlease Import Database from the Menu.")
+             }
         }
+    }
+
+    // 2. STREAMING SEARCH (The Crash Fix)
+    suspend fun search(dbType: DatabaseType, includePatterns: List<String>, excludePatterns: List<String>): List<Inscription> = withContext(Dispatchers.IO) {
+        val results = ArrayList<Inscription>()
+        
+        // Try Internal Storage first, then External
+        var file = File(context.filesDir, dbType.filename)
+        if (!file.exists()) {
+            file = File(context.getExternalFilesDir(null), dbType.filename)
+        }
+        if (!file.exists()) return@withContext emptyList()
+
+        // Prepare Regex (Compile once for speed)
+        val includeRegexes = includePatterns.mapNotNull { try { Pattern.compile(it, Pattern.CASE_INSENSITIVE) } catch (e: Exception) { null } }
+        val excludeRegexes = excludePatterns.mapNotNull { try { Pattern.compile(it, Pattern.CASE_INSENSITIVE) } catch (e: Exception) { null } }
 
         val inputStream = FileInputStream(file)
+        val reader = if (file.name.endsWith(".zip")) {
+            val zis = ZipInputStream(inputStream)
+            zis.nextEntry
+            BufferedReader(InputStreamReader(zis))
+        } else {
+            BufferedReader(InputStreamReader(inputStream), 8192) // 8KB Buffer
+        }
 
         try {
-            val reader = if (dbType.filename.endsWith(".zip")) {
-                val zis = ZipInputStream(inputStream)
-                zis.nextEntry
-                BufferedReader(InputStreamReader(zis))
-            } else {
-                BufferedReader(InputStreamReader(inputStream))
-            }
-
             val currentRecord = StringBuilder()
             var line = reader.readLine()
 
             while (line != null) {
                 if (line.isBlank()) {
+                    // End of a record found
                     if (currentRecord.isNotBlank()) {
                         val raw = currentRecord.toString()
-                        rawRecords.add(raw)
-                        cleanRecords.add(cleanRecord(raw))
-                        currentRecord.clear()
+                        
+                        // CHECK MATCH IMMEDIATELY
+                        if (checkMatch(raw, includeRegexes, excludeRegexes)) {
+                            // Only parse if it is a match
+                            val clean = cleanRecord(raw)
+                            results.add(parseSingleRecord(raw, clean, dbType))
+                            
+                            // SAFETY LIMIT: Stop at 500 results to prevent UI lag
+                            if (results.size >= 500) break
+                        }
+                        
+                        // MEMORY FLUSH: Clear the builder immediately
+                        currentRecord.setLength(0)
                     }
                 } else {
                     currentRecord.append(line).append("\n")
                 }
                 line = reader.readLine()
             }
-            if (currentRecord.isNotBlank()) {
+            // Check the very last record
+            if (currentRecord.isNotBlank() && results.size < 500) {
                 val raw = currentRecord.toString()
-                rawRecords.add(raw)
-                cleanRecords.add(cleanRecord(raw))
+                if (checkMatch(raw, includeRegexes, excludeRegexes)) {
+                    val clean = cleanRecord(raw)
+                    results.add(parseSingleRecord(raw, clean, dbType))
+                }
             }
+        } finally {
             reader.close()
-            currentType = dbType
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            throw e
         }
+        
+        return@withContext results
     }
 
-    suspend fun search(dbType: DatabaseType, includePatterns: List<String>, excludePatterns: List<String>): List<Inscription> = withContext(Dispatchers.Default) {
-        val result = mutableListOf<Inscription>()
-        if (rawRecords.isEmpty()) return@withContext emptyList()
-
-        val includeRegexes = includePatterns.mapNotNull { try { Regex(it, RegexOption.IGNORE_CASE) } catch (e: Exception) { null } }
-        val excludeRegexes = excludePatterns.mapNotNull { try { Regex(it, RegexOption.IGNORE_CASE) } catch (e: Exception) { null } }
-
-        for (i in cleanRecords.indices) {
-            val cleanText = cleanRecords[i]
-            var match = true
-            
-            for (regex in includeRegexes) {
-                if (!regex.containsMatchIn(cleanText)) {
-                    match = false; break
-                }
-            }
-            if (match && excludeRegexes.isNotEmpty()) {
-                for (regex in excludeRegexes) {
-                    if (regex.containsMatchIn(cleanText)) {
-                        match = false; break
-                    }
-                }
-            }
-            if (match) {
-                result.add(parseSingleRecord(rawRecords[i], cleanText, dbType))
-            }
+    // Helper: Fast Regex Check
+    private fun checkMatch(raw: String, includes: List<Pattern>, excludes: List<Pattern>): Boolean {
+        if (raw.isEmpty()) return false
+        
+        // Search the raw text directly for speed
+        for (p in includes) {
+            if (!p.matcher(raw).find()) return false
         }
-        return@withContext result
+        for (p in excludes) {
+            if (p.matcher(raw).find()) return false
+        }
+        return true
     }
 
     private fun parseSingleRecord(raw: String, clean: String, dbType: DatabaseType): Inscription {
         val lines = raw.split("\n")
         
         if (dbType == DatabaseType.LATIN) {
-            // Restore Original Logic: Check line 1 for "Datierung"
             val n = if (lines.size > 1 && lines[1].contains("Datierung:")) 0 else 1
             
-            // TRIM EACH FIELD INDIVIDUALLY to remove the huge gaps
+            // STRICT PARSING (Prevents Layout Gaps)
             val id = lines.getOrElse(0) { "" }.trim()
             val date = if (n == 0) lines.getOrElse(1) { "" }.trim() else ""
             val location = lines.getOrElse(3 - n) { "" }.trim()
             
-            // Clean Text: Replace slashes, remove duplicate newlines
             val rawText = lines.getOrElse(4 - n) { "" }
             val formattedText = rawText.replace("/", "\n")
-                                       .replace(Regex("\\n+"), "\n") // Collapse multiple blank lines
+                                       .replace(Regex("\\n+"), "\n")
                                        .trim()
 
             val ref1 = lines.getOrElse(5 - n) { "" }.trim()

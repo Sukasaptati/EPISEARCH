@@ -38,7 +38,7 @@ import java.io.InputStreamReader
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.net.URL
-import java.net.URLEncoder // <--- IMPORT THIS
+import java.net.URLEncoder
 import javax.net.ssl.HttpsURLConnection
 
 class MainActivity : AppCompatActivity() {
@@ -62,6 +62,16 @@ class MainActivity : AppCompatActivity() {
     private var useOnlineTranslation = false 
     private var currentBitmap: Bitmap? = null
     private lateinit var prefs: SharedPreferences
+
+    // --- NEW: Variable to track which DB we are importing ---
+    private var pendingImportFilename: String = "" 
+
+    // --- NEW: File Picker for Database Import ---
+    private val importDbLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let {
+            importDatabaseFile(it)
+        }
+    }
 
     private val galleryLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
@@ -113,6 +123,11 @@ class MainActivity : AppCompatActivity() {
 
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
+                // --- NEW: Handle Import Click ---
+                R.id.action_import_db -> {
+                    showImportSelectionDialog()
+                    true
+                }
                 R.id.action_ocr_mode -> {
                     useOnlineOcr = !useOnlineOcr
                     item.isChecked = useOnlineOcr
@@ -186,25 +201,26 @@ class MainActivity : AppCompatActivity() {
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selectedDb = dbOptions[position]
-                progressBar.visibility = View.VISIBLE
-                tvStatus.text = "Loading..."
-                btnSearch.isEnabled = false
+                // Only load if file actually exists
+                val file = File(getExternalFilesDir(null), selectedDb.filename)
+                if (file.exists()) {
+                    progressBar.visibility = View.VISIBLE
+                    tvStatus.text = "Loading..."
+                    btnSearch.isEnabled = false
 
-                CoroutineScope(Dispatchers.Main).launch {
-                    try {
-                        parser.loadDatabase(selectedDb)
-                        progressBar.visibility = View.GONE
-                        tvStatus.text = "Ready: ${selectedDb.displayName}"
-                        btnSearch.isEnabled = true
-                    } catch (e: Exception) {
-                        progressBar.visibility = View.GONE
-                        tvStatus.text = "Error Loading DB"
-                        AlertDialog.Builder(this@MainActivity)
-                            .setTitle("Database Missing")
-                            .setMessage(e.message)
-                            .setPositiveButton("OK", null)
-                            .show()
+                    CoroutineScope(Dispatchers.Main).launch {
+                        try {
+                            parser.loadDatabase(selectedDb)
+                            progressBar.visibility = View.GONE
+                            tvStatus.text = "Ready: ${selectedDb.displayName}"
+                            btnSearch.isEnabled = true
+                        } catch (e: Exception) {
+                            progressBar.visibility = View.GONE
+                            tvStatus.text = "Error Loading DB"
+                        }
                     }
+                } else {
+                    tvStatus.text = "DB Missing. Import from Menu."
                 }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -244,15 +260,74 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener { saveFileLauncher.launch("Output.txt") }
     }
 
+    // --- NEW: IMPORT LOGIC ---
+    private fun showImportSelectionDialog() {
+        val options = arrayOf("Latin Inscriptions", "Greek Inscriptions", "Greek Papyri")
+        val filenames = arrayOf(
+            "Latin-inscriptions-CIL-AE-JRA.txt",
+            "Greek inscriptions.txt",
+            "greek papyrus.txt"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("Which database are you importing?")
+            .setItems(options) { _, which ->
+                // Save the target filename so we rename the import correctly
+                pendingImportFilename = filenames[which]
+                Toast.makeText(this, "Select the file from your Downloads", Toast.LENGTH_LONG).show()
+                // Open file picker
+                importDbLauncher.launch("*/*")
+            }
+            .show()
+    }
+
+    private fun importDatabaseFile(sourceUri: Uri) {
+        if (pendingImportFilename.isEmpty()) return
+        
+        progressBar.visibility = View.VISIBLE
+        tvStatus.text = "Importing..."
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // Determine target location in internal storage
+                val destFile = File(getExternalFilesDir(null), pendingImportFilename)
+                
+                // Stream Copy
+                contentResolver.openInputStream(sourceUri)?.use { input ->
+                    destFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                withContext(Dispatchers.Main) {
+                    progressBar.visibility = View.GONE
+                    tvStatus.text = "Import Successful!"
+                    Toast.makeText(this@MainActivity, "Database Imported!", Toast.LENGTH_SHORT).show()
+                    // Reload current DB just in case
+                    val spinner = findViewById<Spinner>(R.id.spinnerDatabase)
+                    val dbOptions = InscriptionParser.DatabaseType.values()
+                    val selectedDb = dbOptions[spinner.selectedItemPosition]
+                    if (selectedDb.filename == pendingImportFilename) {
+                        // Trigger reload
+                         parser.loadDatabase(selectedDb)
+                         tvStatus.text = "Ready: ${selectedDb.displayName}"
+                         findViewById<Button>(R.id.btnSearch).isEnabled = true
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    progressBar.visibility = View.GONE
+                    tvStatus.text = "Import Failed"
+                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     // --- TRANSLATION LOGIC ---
     private fun translateText(text: String) {
-        // 1. Resolve tags: <x=CS> becomes x
         var cleaned = text.replace(Regex("<(\\p{L}+)=\\p{L}+>"), "$1")
-        
-        // 2. Remove all brackets: () [] {} <> 
         cleaned = cleaned.replace(Regex("[\\(\\)\\[\\]\\{\\}<>]"), "")
-        
-        // 3. Remove question marks
         cleaned = cleaned.replace("?", "")
 
         if (cleaned.isBlank()) {
@@ -271,12 +346,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- FIX IS HERE: ENCODE THE TEXT ---
     private fun runOfflineTranslationIntent(text: String, lang: String) {
         try {
-            // Encode spaces and special chars (e.g., " " -> "%20")
             val encodedText = URLEncoder.encode(text, "UTF-8")
-            
             val intent = Intent(Intent.ACTION_VIEW)
             intent.data = Uri.parse("http://translate.google.com/m/translate?client=android-translate&q=$encodedText&sl=$lang&tl=en")
             startActivity(intent)
@@ -317,7 +389,6 @@ class MainActivity : AppCompatActivity() {
                     val reader = BufferedReader(InputStreamReader(conn.inputStream))
                     val response = reader.readText()
                     reader.close()
-                    
                     val jsonResponse = JSONObject(response)
                     val translatedText = jsonResponse.getJSONObject("data")
                         .getJSONArray("translations")
