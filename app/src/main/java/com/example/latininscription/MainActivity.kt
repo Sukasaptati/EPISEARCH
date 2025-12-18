@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.text.util.Linkify
 import android.util.Base64
 import android.view.View
 import android.widget.*
@@ -23,6 +24,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+// GEMINI IMPORT
+import com.google.ai.client.generativeai.GenerativeModel
 import com.googlecode.tesseract.android.TessBaseAPI
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,17 +62,45 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tessApi: TessBaseAPI
     private var isTesseractReady = false
     private var useOnlineOcr = false
-    private var useOnlineTranslation = false 
+    
+    // 0 = Offline App, 1 = Google Cloud, 2 = Gemini
+    private var translationEngine = 0 
+    
     private var currentBitmap: Bitmap? = null
     private lateinit var prefs: SharedPreferences
-
-    // --- NEW: Variable to track which DB we are importing ---
     private var pendingImportFilename: String = "" 
 
-    // --- NEW: File Picker for Database Import ---
-    private val importDbLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    // --- FILE PICKER FOR LINKING DATABASES ---
+    private val importDbLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
-            importDatabaseFile(it)
+            // Grant permanent permission to read this file
+            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            
+            val selectedType = InscriptionParser.DatabaseType.values().find { type -> 
+                type.filename == pendingImportFilename 
+            }
+            if (selectedType != null) {
+                prefs.edit().putString("URI_${selectedType.name}", it.toString()).apply()
+                val currentMap = parser.databaseUris.toMutableMap()
+                currentMap[selectedType] = it
+                parser.databaseUris = currentMap
+                Toast.makeText(this, "Linked ${selectedType.displayName}!", Toast.LENGTH_SHORT).show()
+                
+                progressBar.visibility = View.VISIBLE
+                tvStatus.text = "Loading..."
+                CoroutineScope(Dispatchers.Main).launch {
+                    try {
+                        parser.loadDatabase(selectedType)
+                        progressBar.visibility = View.GONE
+                        tvStatus.text = "Ready: ${selectedType.displayName}"
+                        findViewById<Button>(R.id.btnSearch).isEnabled = true
+                    } catch (e: Exception) {
+                        progressBar.visibility = View.GONE
+                        tvStatus.text = "Error"
+                        Toast.makeText(this@MainActivity, e.message, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
         }
     }
 
@@ -112,22 +143,33 @@ class MainActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("EDCS_PREFS", Context.MODE_PRIVATE)
 
+        useOnlineOcr = prefs.getBoolean("USE_ONLINE_OCR", false)
+        translationEngine = prefs.getInt("TRANS_ENGINE", 0)
+
+        // RESTORE SAVED DATABASE LINKS
+        val savedUris = mutableMapOf<InscriptionParser.DatabaseType, Uri>()
+        InscriptionParser.DatabaseType.values().forEach { type ->
+            val uriString = prefs.getString("URI_${type.name}", null)
+            if (uriString != null) {
+                val uri = Uri.parse(uriString)
+                try {
+                    contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    savedUris[type] = uri
+                } catch (e: Exception) { }
+            }
+        }
+        parser.databaseUris = savedUris
+
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         toolbar.inflateMenu(R.menu.menu_main)
         
-        useOnlineOcr = prefs.getBoolean("USE_ONLINE_OCR", false)
-        useOnlineTranslation = prefs.getBoolean("USE_ONLINE_TRANS", false)
-        
         toolbar.menu.findItem(R.id.action_ocr_mode).isChecked = useOnlineOcr
-        toolbar.menu.findItem(R.id.action_online_translation).isChecked = useOnlineTranslation
+        updateEngineMenuState(toolbar.menu)
 
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                // --- NEW: Handle Import Click ---
-                R.id.action_import_db -> {
-                    showImportSelectionDialog()
-                    true
-                }
+                R.id.action_instructions -> { showInstructionsDialog(); true }
+                R.id.action_import_db -> { showImportSelectionDialog(); true }
                 R.id.action_ocr_mode -> {
                     useOnlineOcr = !useOnlineOcr
                     item.isChecked = useOnlineOcr
@@ -135,17 +177,14 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "OCR: ${if (useOnlineOcr) "Online" else "Offline"}", Toast.LENGTH_SHORT).show()
                     true
                 }
-                R.id.action_online_translation -> {
-                    useOnlineTranslation = !useOnlineTranslation
-                    item.isChecked = useOnlineTranslation
-                    prefs.edit().putBoolean("USE_ONLINE_TRANS", useOnlineTranslation).apply()
-                    Toast.makeText(this, "Translation: ${if (useOnlineTranslation) "Online" else "App (Offline)"}", Toast.LENGTH_SHORT).show()
-                    true
-                }
-                R.id.action_set_api_key -> {
-                    showApiKeyDialog()
-                    true
-                }
+                // SWITCH ENGINES
+                R.id.engine_offline -> { setTranslationEngine(0, item); true }
+                R.id.engine_cloud -> { setTranslationEngine(1, item); true }
+                R.id.engine_gemini -> { setTranslationEngine(2, item); true }
+                
+                // SET KEYS
+                R.id.action_set_cloud_key -> { showCloudApiKeyDialog(); true }
+                R.id.action_set_gemini_key -> { showGeminiApiKeyDialog(); true }
                 else -> false
             }
         }
@@ -201,9 +240,8 @@ class MainActivity : AppCompatActivity() {
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selectedDb = dbOptions[position]
-                // Only load if file actually exists
-                val file = File(getExternalFilesDir(null), selectedDb.filename)
-                if (file.exists()) {
+                // Try to load if linked
+                if (parser.databaseUris.containsKey(selectedDb) || File(filesDir, selectedDb.filename).exists()) {
                     progressBar.visibility = View.VISIBLE
                     tvStatus.text = "Loading..."
                     btnSearch.isEnabled = false
@@ -220,7 +258,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 } else {
-                    tvStatus.text = "DB Missing. Import from Menu."
+                    tvStatus.text = "Please Link Database (Menu)"
                 }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
@@ -260,71 +298,25 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener { saveFileLauncher.launch("Output.txt") }
     }
 
-    // --- NEW: IMPORT LOGIC ---
-    private fun showImportSelectionDialog() {
-        val options = arrayOf("Latin Inscriptions", "Greek Inscriptions", "Greek Papyri")
-        val filenames = arrayOf(
-            "Latin-inscriptions-CIL-AE-JRA.txt",
-            "Greek inscriptions.txt",
-            "greek papyrus.txt"
-        )
-
-        AlertDialog.Builder(this)
-            .setTitle("Which database are you importing?")
-            .setItems(options) { _, which ->
-                // Save the target filename so we rename the import correctly
-                pendingImportFilename = filenames[which]
-                Toast.makeText(this, "Select the file from your Downloads", Toast.LENGTH_LONG).show()
-                // Open file picker
-                importDbLauncher.launch("*/*")
-            }
-            .show()
-    }
-
-    private fun importDatabaseFile(sourceUri: Uri) {
-        if (pendingImportFilename.isEmpty()) return
-        
-        progressBar.visibility = View.VISIBLE
-        tvStatus.text = "Importing..."
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                // Determine target location in internal storage
-                val destFile = File(getExternalFilesDir(null), pendingImportFilename)
-                
-                // Stream Copy
-                contentResolver.openInputStream(sourceUri)?.use { input ->
-                    destFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                
-                withContext(Dispatchers.Main) {
-                    progressBar.visibility = View.GONE
-                    tvStatus.text = "Import Successful!"
-                    Toast.makeText(this@MainActivity, "Database Imported!", Toast.LENGTH_SHORT).show()
-                    // Reload current DB just in case
-                    val spinner = findViewById<Spinner>(R.id.spinnerDatabase)
-                    val dbOptions = InscriptionParser.DatabaseType.values()
-                    val selectedDb = dbOptions[spinner.selectedItemPosition]
-                    if (selectedDb.filename == pendingImportFilename) {
-                        // Trigger reload
-                         parser.loadDatabase(selectedDb)
-                         tvStatus.text = "Ready: ${selectedDb.displayName}"
-                         findViewById<Button>(R.id.btnSearch).isEnabled = true
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    progressBar.visibility = View.GONE
-                    tvStatus.text = "Import Failed"
-                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
+    private fun setTranslationEngine(engine: Int, item: android.view.MenuItem) {
+        translationEngine = engine
+        prefs.edit().putInt("TRANS_ENGINE", engine).apply()
+        val menu = findViewById<Toolbar>(R.id.toolbar).menu
+        updateEngineMenuState(menu)
+        val name = when(engine) {
+            0 -> "Google App (Offline)"
+            1 -> "Google Cloud API"
+            else -> "Gemini AI"
         }
+        Toast.makeText(this, "Engine set to: $name", Toast.LENGTH_SHORT).show()
     }
 
-    // --- TRANSLATION LOGIC ---
+    private fun updateEngineMenuState(menu: android.view.Menu) {
+        menu.findItem(R.id.engine_offline).isChecked = (translationEngine == 0)
+        menu.findItem(R.id.engine_cloud).isChecked = (translationEngine == 1)
+        menu.findItem(R.id.engine_gemini).isChecked = (translationEngine == 2)
+    }
+
     private fun translateText(text: String) {
         var cleaned = text.replace(Regex("<(\\p{L}+)=\\p{L}+>"), "$1")
         cleaned = cleaned.replace(Regex("[\\(\\)\\[\\]\\{\\}<>]"), "")
@@ -339,13 +331,14 @@ class MainActivity : AppCompatActivity() {
         val isGreek = spinner.selectedItem.toString().contains("Greek")
         val sourceLang = if (isGreek) "el" else "la"
 
-        if (useOnlineTranslation) {
-            runOnlineTranslation(cleaned, sourceLang)
-        } else {
-            runOfflineTranslationIntent(cleaned, sourceLang)
+        when (translationEngine) {
+            0 -> runOfflineTranslationIntent(cleaned, sourceLang)
+            1 -> runOnlineTranslation(cleaned, sourceLang)
+            2 -> runGeminiTranslation(cleaned)
         }
     }
 
+    // 0. OFFLINE APP INTENT
     private fun runOfflineTranslationIntent(text: String, lang: String) {
         try {
             val encodedText = URLEncoder.encode(text, "UTF-8")
@@ -357,15 +350,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // 1. CLOUD TRANSLATION API (Uses Cloud Key)
     private fun runOnlineTranslation(text: String, sourceLang: String) {
         val apiKey = prefs.getString("GOOGLE_API_KEY", "") ?: ""
         if (apiKey.isEmpty()) {
-            Toast.makeText(this, "API Key missing! Set it in Menu.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Cloud Key missing! Set it in Menu.", Toast.LENGTH_LONG).show()
             return
         }
-
-        val loadingDialog = AlertDialog.Builder(this).setMessage("Translating...").show()
-
+        val loadingDialog = AlertDialog.Builder(this).setMessage("Translating (Cloud)...").show()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val jsonRequest = JSONObject()
@@ -373,18 +365,15 @@ class MainActivity : AppCompatActivity() {
                 jsonRequest.put("source", sourceLang)
                 jsonRequest.put("target", "en")
                 jsonRequest.put("format", "text")
-
                 val url = URL("https://translation.googleapis.com/language/translate/v2?key=$apiKey")
                 val conn = url.openConnection() as HttpsURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.doOutput = true
-
                 val writer = OutputStreamWriter(conn.outputStream)
                 writer.write(jsonRequest.toString())
                 writer.flush()
                 writer.close()
-
                 if (conn.responseCode == 200) {
                     val reader = BufferedReader(InputStreamReader(conn.inputStream))
                     val response = reader.readText()
@@ -394,19 +383,9 @@ class MainActivity : AppCompatActivity() {
                         .getJSONArray("translations")
                         .getJSONObject(0)
                         .getString("translatedText")
-
                     withContext(Dispatchers.Main) { 
                         loadingDialog.dismiss()
-                        AlertDialog.Builder(this@MainActivity)
-                            .setTitle("Translation")
-                            .setMessage(translatedText)
-                            .setPositiveButton("Copy") { _, _ ->
-                                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                val clip = android.content.ClipData.newPlainText("Translation", translatedText)
-                                clipboard.setPrimaryClip(clip)
-                            }
-                            .setNegativeButton("Close", null)
-                            .show()
+                        showTranslationResult(translatedText, "Google Cloud")
                     }
                 } else {
                     withContext(Dispatchers.Main) { 
@@ -423,34 +402,90 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // 2. GEMINI AI TRANSLATION (Uses Gemini Key + gemini-2.5-flash)
+    private fun runGeminiTranslation(text: String) {
+        val apiKey = prefs.getString("GEMINI_API_KEY", "") ?: ""
+        if (apiKey.isEmpty()) {
+            Toast.makeText(this, "Gemini API Key missing! Set it in Menu.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val loadingDialog = AlertDialog.Builder(this).setMessage("Asking Gemini...").show()
+
+        // --- WORKING MODEL ---
+        val generativeModel = GenerativeModel(
+            modelName = "gemini-2.5-flash",
+            apiKey = apiKey
+        )
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val prompt = """
+                    You are an expert in Ancient Latin and Greek Epigraphy and Papyrology.
+                    Translate the following text into English.
+                    
+                    Notes:
+                    - Expand abbreviations (e.g., 'D M' -> 'Dis Manibus').
+                    - Text in brackets [] or () is restored; keep the meaning clear.
+                    - Provide a formal, academic translation.
+                    
+                    Text: "$text"
+                """.trimIndent()
+
+                val response = generativeModel.generateContent(prompt)
+                val translatedText = response.text ?: "No translation generated."
+
+                withContext(Dispatchers.Main) {
+                    loadingDialog.dismiss()
+                    showTranslationResult(translatedText, "Gemini AI")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    loadingDialog.dismiss()
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Gemini Error")
+                        .setMessage("Error: ${e.localizedMessage}")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        }
+    }
+
+    private fun showTranslationResult(text: String, title: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(text)
+            .setPositiveButton("Copy") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("Translation", text)
+                clipboard.setPrimaryClip(clip)
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    // --- FIX FOR MISSING MENU: BUTTON BASED SELECTION ---
     private fun showTextSelectionDialog(text: String) {
         val textView = TextView(this)
         textView.text = text
-        textView.textSize = 20f 
+        textView.textSize = 20f
         textView.setPadding(50, 50, 50, 50)
         textView.setTextColor(Color.BLACK)
-        textView.setTextIsSelectable(true) 
+        textView.setTextIsSelectable(true)
 
+        // Floating Menu Attempt (Backwards Compatibility)
         textView.customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
             override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
                 menu.add(0, 100, 0, "EDCS Translate")
+                    .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_IF_ROOM)
                 return true
             }
             override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = false
             override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem): Boolean {
                 if (item.itemId == 100) {
-                    var min = 0
-                    var max = textView.text.length
-                    if (textView.isFocused) {
-                        val selStart = textView.selectionStart
-                        val selEnd = textView.selectionEnd
-                        min = maxOf(0, minOf(selStart, selEnd))
-                        max = maxOf(0, maxOf(selStart, selEnd))
-                    }
-                    val selectedText = textView.text.subSequence(min, max).toString()
-                    if (selectedText.isNotBlank()) {
-                        translateText(selectedText)
-                    }
+                    translateCurrentSelection(textView)
                     mode.finish()
                     return true
                 }
@@ -459,25 +494,121 @@ class MainActivity : AppCompatActivity() {
             override fun onDestroyActionMode(mode: android.view.ActionMode) {}
         }
 
+        // PERMANENT BUTTON FIX
         AlertDialog.Builder(this)
             .setTitle("Select Text")
             .setView(textView)
-            .setPositiveButton("Close", null)
+            .setPositiveButton("Translate Selection") { _, _ ->
+                translateCurrentSelection(textView)
+            }
+            .setNegativeButton("Close", null)
             .show()
     }
 
-    private fun showApiKeyDialog() {
+    private fun translateCurrentSelection(textView: TextView) {
+        var min = 0
+        var max = textView.text.length
+        
+        if (textView.isFocused && textView.hasSelection()) {
+            min = textView.selectionStart
+            max = textView.selectionEnd
+        }
+
+        val start = maxOf(0, minOf(min, max))
+        val end = maxOf(0, maxOf(min, max))
+
+        val selectedText = if (start != end) {
+            textView.text.subSequence(start, end).toString()
+        } else {
+            // If nothing selected, translate everything
+            textView.text.toString()
+        }
+
+        if (selectedText.isNotBlank()) {
+            translateText(selectedText)
+        } else {
+            Toast.makeText(this, "No text selected", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // --- DIALOGS ---
+    private fun showCloudApiKeyDialog() {
         val input = EditText(this)
-        input.hint = "Paste Google API Key here"
+        input.hint = "Paste Google Cloud API Key"
         input.setText(prefs.getString("GOOGLE_API_KEY", ""))
         AlertDialog.Builder(this)
-            .setTitle("Set API Key")
+            .setTitle("Set Cloud Vision/Translate Key")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 prefs.edit().putString("GOOGLE_API_KEY", input.text.toString().trim()).apply()
-                Toast.makeText(this, "Key Saved!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Cloud Key Saved!", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showGeminiApiKeyDialog() {
+        val input = EditText(this)
+        input.hint = "Paste Gemini API Key"
+        input.setText(prefs.getString("GEMINI_API_KEY", ""))
+        AlertDialog.Builder(this)
+            .setTitle("Set Gemini API Key")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                prefs.edit().putString("GEMINI_API_KEY", input.text.toString().trim()).apply()
+                Toast.makeText(this, "Gemini Key Saved!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showInstructionsDialog() {
+        val message = """
+            Android apk for searching Latin and Greek inscriptions and papyri
+
+            Sources
+            Latin Epigraphy: http://db.edcs.eu/epigr/epi.php
+            Greek Inscriptions: https://inscriptions.packhum.org
+            Papyri: https://papyri.info
+
+            Use the dropdown menu at the top to choose databases. It takes a few seconds to load.
+
+            Use the first search bar to look for inscriptions that contain the keywords you want, and the second one for inscriptions without the keywords. Separate multiple keywords with '&&'. Keywords will be highlighted in red in the search results.
+
+            The scan button allows you to take a photo or load a local image for OCR.
+            
+            TRANSLATION ENGINES:
+            1. Google App (Offline): Uses the installed Google Translate app. Requires Language Packs.
+            2. Google Cloud API (Online): Standard machine translation. Fast. Uses 'Cloud API Key'.
+            3. Gemini AI (Smart): Context-aware translation for epigraphy. Uses 'Gemini API Key'.
+
+            You can set your API Keys in the top-right menu.
+        """.trimIndent()
+        val alert = AlertDialog.Builder(this)
+            .setTitle("Instructions")
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .create()
+        alert.show()
+        val messageView = alert.findViewById<TextView>(android.R.id.message)
+        messageView?.autoLinkMask = Linkify.WEB_URLS
+        messageView?.movementMethod = android.text.method.LinkMovementMethod.getInstance()
+    }
+
+    private fun showImportSelectionDialog() {
+        val options = arrayOf("Latin Inscriptions", "Greek Inscriptions", "Greek Papyri")
+        val types = arrayOf(
+            InscriptionParser.DatabaseType.LATIN,
+            InscriptionParser.DatabaseType.GREEK_INS,
+            InscriptionParser.DatabaseType.GREEK_PAPY
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Link Database File")
+            .setItems(options) { _, which ->
+                pendingImportFilename = types[which].filename
+                Toast.makeText(this, "Select the ${options[which]} file", Toast.LENGTH_LONG).show()
+                importDbLauncher.launch(arrayOf("text/plain"))
+            }
             .show()
     }
 
@@ -496,11 +627,11 @@ class MainActivity : AppCompatActivity() {
         val scaledBitmap = scaleBitmapDown(originalBitmap, 1024)
         val safeBitmap = scaledBitmap.copy(Bitmap.Config.ARGB_8888, true)
         currentBitmap = safeBitmap
-
         layoutOcrResult.visibility = View.VISIBLE
         tvTranslation.visibility = View.GONE
         progressBar.visibility = View.VISIBLE
         
+        // OCR uses Cloud Key
         if (useOnlineOcr) {
             ivPreview.setImageBitmap(safeBitmap) 
             tvStatus.text = "Sending to Google Cloud..."
@@ -522,31 +653,26 @@ class MainActivity : AppCompatActivity() {
     private fun runCloudVision(bitmap: Bitmap) {
         val apiKey = prefs.getString("GOOGLE_API_KEY", "") ?: ""
         if (apiKey.isEmpty()) {
-            Toast.makeText(this, "Please set API Key in Menu!", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Cloud Key missing! Set it in Menu.", Toast.LENGTH_LONG).show()
             tvOcrText.text = "Error: Missing API Key."
             progressBar.visibility = View.GONE
             return
         }
-
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val outputStream = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
                 val base64Image = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
-
                 val jsonRequest = """{ "requests": [ { "image": { "content": "$base64Image" }, "features": [ { "type": "DOCUMENT_TEXT_DETECTION" } ] } ] }"""
-
                 val url = URL("https://vision.googleapis.com/v1/images:annotate?key=$apiKey")
                 val conn = url.openConnection() as HttpsURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.doOutput = true
-
                 val writer = OutputStreamWriter(conn.outputStream)
                 writer.write(jsonRequest)
                 writer.flush()
                 writer.close()
-
                 if (conn.responseCode == 200) {
                     val reader = BufferedReader(InputStreamReader(conn.inputStream))
                     val response = reader.readText()
@@ -613,7 +739,6 @@ class MainActivity : AppCompatActivity() {
         val originalHeight = bitmap.height
         var resizedWidth = maxDimension
         var resizedHeight = maxDimension
-
         if (originalWidth > maxDimension || originalHeight > maxDimension) {
             if (originalWidth > originalHeight) {
                 resizedHeight = (originalHeight.toFloat() / originalWidth.toFloat() * resizedWidth).toInt()
@@ -634,7 +759,6 @@ class MainActivity : AppCompatActivity() {
         val windowSize = 20
         val contrastBias = 10 
         val grayPixels = IntArray(width * height)
-        
         for (i in pixels.indices) {
             val p = pixels[i]
             val r = (p shr 16) and 0xFF
@@ -642,7 +766,6 @@ class MainActivity : AppCompatActivity() {
             val b = p and 0xFF
             grayPixels[i] = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
         }
-
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val index = y * width + x
@@ -673,10 +796,8 @@ class MainActivity : AppCompatActivity() {
                 val dataPath = getExternalFilesDir(null)?.absolutePath + "/tessdata/"
                 val dir = File(dataPath)
                 if (!dir.exists()) dir.mkdirs()
-
                 copyAssetFile("tessdata/grc.traineddata", dataPath + "grc.traineddata")
                 copyAssetFile("tessdata/lat.traineddata", dataPath + "lat.traineddata")
-
                 val success = tessApi.init(getExternalFilesDir(null)?.absolutePath, "grc+lat")
                 withContext(Dispatchers.Main) {
                     if (success) isTesseractReady = true

@@ -3,8 +3,13 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_instructions"
+        android:title="Guide"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_import_db"
-        android:title="Import Database"
+        android:title="Link Database File"
         app:showAsAction="never" />
 
     <item
@@ -14,13 +19,33 @@
         app:showAsAction="never" />
 
     <item
-        android:id="@+id/action_online_translation"
-        android:title="Use Online Translation"
-        android:checkable="true"
+        android:id="@+id/action_trans_engine"
+        android:title="Translation Engine"
+        app:showAsAction="never">
+        <menu>
+            <item
+                android:id="@+id/engine_offline"
+                android:title="Google App (Offline)"
+                android:checkable="true" />
+            <item
+                android:id="@+id/engine_cloud"
+                android:title="Google Cloud API (Online)"
+                android:checkable="true" />
+            <item
+                android:id="@+id/engine_gemini"
+                android:title="Gemini AI (Smart)"
+                android:checkable="true" />
+        </menu>
+    </item>
+
+    <item
+        android:id="@+id/action_set_cloud_key"
+        android:title="Set Cloud API Key (Vision)"
         app:showAsAction="never" />
 
     <item
-        android:id="@+id/action_set_api_key"
-        android:title="Set Google API Key"
+        android:id="@+id/action_set_gemini_key"
+        android:title="Set Gemini API Key"
         app:showAsAction="never" />
+
 </menu>

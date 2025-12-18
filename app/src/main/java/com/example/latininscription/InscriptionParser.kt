@@ -1,12 +1,14 @@
 package com.example.latininscription
 
 import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileNotFoundException
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.regex.Pattern
 import java.util.zip.ZipInputStream
@@ -29,7 +31,13 @@ class InscriptionParser(private val context: Context) {
         GREEK_PAPY("greek papyrus.txt", "Greek Papyri")
     }
 
-    // MEMORY FIX: No ArrayLists here. We do not store the file in RAM.
+    // URI Map (Required for MainActivity compatibility)
+    var databaseUris: Map<DatabaseType, Uri> = emptyMap()
+
+    // HIGH PERFORMANCE: Store everything in RAM
+    private var rawRecords: ArrayList<String> = ArrayList()
+    private var cleanRecords: ArrayList<String> = ArrayList()
+    private var currentType: DatabaseType? = null
 
     private val tagRegex = Regex("<(\\p{L}+)=\\p{L}+>")
     private val cleanupRegex = Regex("[\\\\[\\\\])(}{/<>,\\-]")
@@ -38,100 +46,110 @@ class InscriptionParser(private val context: Context) {
         return raw.replace(tagRegex, "$1").replace(cleanupRegex, "")
     }
 
-    // 1. LIGHTWEIGHT LOAD
-    // We only check if the file exists. We do NOT read it into memory yet.
     suspend fun loadDatabase(dbType: DatabaseType) = withContext(Dispatchers.IO) {
-        // Use filesDir (Internal Storage) for safety
-        val file = File(context.filesDir, dbType.filename) 
-        
-        if (!file.exists()) {
-             // Fallback to check external just in case user didn't re-import yet
-             val extFile = File(context.getExternalFilesDir(null), dbType.filename)
-             if (!extFile.exists()) {
-                 throw FileNotFoundException("File not found: ${dbType.filename}\nPlease Import Database from the Menu.")
-             }
+        // If this exact DB is already loaded in RAM, skip loading (Instant Switch)
+        if (currentType == dbType && rawRecords.isNotEmpty()) return@withContext
+
+        // Clear old memory
+        rawRecords.clear()
+        cleanRecords.clear()
+        System.gc() // Suggest garbage collection to free up space
+
+        var inputStream: InputStream? = null
+
+        // 1. Try Loading from Linked URI (Priority)
+        val uri = databaseUris[dbType]
+        if (uri != null) {
+            try {
+                inputStream = context.contentResolver.openInputStream(uri)
+            } catch (e: Exception) {
+                // If URI fails (e.g., file moved), fall through to internal storage
+            }
         }
-    }
 
-    // 2. STREAMING SEARCH (The Crash Fix)
-    suspend fun search(dbType: DatabaseType, includePatterns: List<String>, excludePatterns: List<String>): List<Inscription> = withContext(Dispatchers.IO) {
-        val results = ArrayList<Inscription>()
-        
-        // Try Internal Storage first, then External
-        var file = File(context.filesDir, dbType.filename)
-        if (!file.exists()) {
-            file = File(context.getExternalFilesDir(null), dbType.filename)
+        // 2. Try Internal Storage (Fallback)
+        if (inputStream == null) {
+            val file = File(context.filesDir, dbType.filename)
+            if (file.exists()) {
+                inputStream = FileInputStream(file)
+            }
         }
-        if (!file.exists()) return@withContext emptyList()
 
-        // Prepare Regex (Compile once for speed)
-        val includeRegexes = includePatterns.mapNotNull { try { Pattern.compile(it, Pattern.CASE_INSENSITIVE) } catch (e: Exception) { null } }
-        val excludeRegexes = excludePatterns.mapNotNull { try { Pattern.compile(it, Pattern.CASE_INSENSITIVE) } catch (e: Exception) { null } }
-
-        val inputStream = FileInputStream(file)
-        val reader = if (file.name.endsWith(".zip")) {
-            val zis = ZipInputStream(inputStream)
-            zis.nextEntry
-            BufferedReader(InputStreamReader(zis))
-        } else {
-            BufferedReader(InputStreamReader(inputStream), 8192) // 8KB Buffer
+        if (inputStream == null) {
+            throw FileNotFoundException("Database not found for ${dbType.displayName}.\nPlease use 'Link Database File' in the menu.")
         }
 
         try {
+            val reader = BufferedReader(InputStreamReader(inputStream), 8192) // 8KB Buffer
+
             val currentRecord = StringBuilder()
             var line = reader.readLine()
 
+            // READ EVERYTHING INTO RAM
             while (line != null) {
                 if (line.isBlank()) {
-                    // End of a record found
                     if (currentRecord.isNotBlank()) {
                         val raw = currentRecord.toString()
-                        
-                        // CHECK MATCH IMMEDIATELY
-                        if (checkMatch(raw, includeRegexes, excludeRegexes)) {
-                            // Only parse if it is a match
-                            val clean = cleanRecord(raw)
-                            results.add(parseSingleRecord(raw, clean, dbType))
-                            
-                            // SAFETY LIMIT: Stop at 500 results to prevent UI lag
-                            if (results.size >= 500) break
-                        }
-                        
-                        // MEMORY FLUSH: Clear the builder immediately
-                        currentRecord.setLength(0)
+                        rawRecords.add(raw)
+                        cleanRecords.add(cleanRecord(raw))
+                        currentRecord.setLength(0) 
                     }
                 } else {
                     currentRecord.append(line).append("\n")
                 }
                 line = reader.readLine()
             }
-            // Check the very last record
-            if (currentRecord.isNotBlank() && results.size < 500) {
+            // Add the last record
+            if (currentRecord.isNotBlank()) {
                 val raw = currentRecord.toString()
-                if (checkMatch(raw, includeRegexes, excludeRegexes)) {
-                    val clean = cleanRecord(raw)
-                    results.add(parseSingleRecord(raw, clean, dbType))
-                }
+                rawRecords.add(raw)
+                cleanRecords.add(cleanRecord(raw))
             }
-        } finally {
             reader.close()
+            currentType = dbType
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            throw e
         }
-        
-        return@withContext results
     }
 
-    // Helper: Fast Regex Check
-    private fun checkMatch(raw: String, includes: List<Pattern>, excludes: List<Pattern>): Boolean {
-        if (raw.isEmpty()) return false
+    suspend fun search(dbType: DatabaseType, includePatterns: List<String>, excludePatterns: List<String>): List<Inscription> = withContext(Dispatchers.Default) {
+        val result = mutableListOf<Inscription>()
         
-        // Search the raw text directly for speed
-        for (p in includes) {
-            if (!p.matcher(raw).find()) return false
+        if (rawRecords.isEmpty()) return@withContext emptyList()
+
+        // Compile regexes once for speed
+        val includeRegexes = includePatterns.mapNotNull { try { Pattern.compile(it, Pattern.CASE_INSENSITIVE) } catch (e: Exception) { null } }
+        val excludeRegexes = excludePatterns.mapNotNull { try { Pattern.compile(it, Pattern.CASE_INSENSITIVE) } catch (e: Exception) { null } }
+
+        // FAST RAM LOOP
+        for (i in cleanRecords.indices) {
+            val cleanText = cleanRecords[i]
+            var match = true
+            
+            // Check Includes
+            for (p in includeRegexes) {
+                if (!p.matcher(cleanText).find()) {
+                    match = false; break
+                }
+            }
+            // Check Excludes
+            if (match && excludeRegexes.isNotEmpty()) {
+                for (p in excludeRegexes) {
+                    if (p.matcher(cleanText).find()) {
+                        match = false; break
+                    }
+                }
+            }
+            
+            if (match) {
+                result.add(parseSingleRecord(rawRecords[i], cleanText, dbType))
+                // Optional: Limit results to avoid UI lag if user searches for "e"
+                // if (result.size >= 2000) break 
+            }
         }
-        for (p in excludes) {
-            if (p.matcher(raw).find()) return false
-        }
-        return true
+        return@withContext result
     }
 
     private fun parseSingleRecord(raw: String, clean: String, dbType: DatabaseType): Inscription {
@@ -140,7 +158,6 @@ class InscriptionParser(private val context: Context) {
         if (dbType == DatabaseType.LATIN) {
             val n = if (lines.size > 1 && lines[1].contains("Datierung:")) 0 else 1
             
-            // STRICT PARSING (Prevents Layout Gaps)
             val id = lines.getOrElse(0) { "" }.trim()
             val date = if (n == 0) lines.getOrElse(1) { "" }.trim() else ""
             val location = lines.getOrElse(3 - n) { "" }.trim()
