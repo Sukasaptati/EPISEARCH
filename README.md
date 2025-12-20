@@ -8,8 +8,9 @@ Sources
   
   Papyri: https://papyri.info
 
-Use the dropdown menu at the top to choose databases. It takes a few seconds to load.
+Use Link Database Files in the top-right menu to link the apk to the databases stored on your device.
 
+Use the dropdown menu at the top to choose databases. It takes a few seconds to load.
 
 Use the first search bar to look for inscriptions that contain the keywords you want, and the second one for inscriptions without the keywords. Separate multiple keywords with '&&'. Keywords will be highlighted in red in the search results.
 
@@ -19,8 +20,11 @@ If you no longer need the image, you can click the "X" in the upper right corner
 
 The databases are stored at Android/Data/com.example.latininscription/files
 
-Offline translation is available via Google Translate App's offline mode. Install Goolge Trasnlate on your phone and download Latin and Greek language packs. You can choose online or offline mode of translation in the setting menu (in the top right of the window).
+You can choose offline translation, online translation and AI smart translation. Offline translation is available via Google Translate App's offline mode. Install Google Translate on your phone and download Latin and Greek language packs. AI translation is offered by gemini, and uses gemini api key (from ai studio, currently 15 requests per minute for gree tier). You can choose one mode of translation in the setting menu (in the top right of the window).
 
+![Screenshot_2025-12-18-10-45-39-99_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/873556fa-822a-48bc-8929-9718fa7e2881)
+![Screenshot_2025-12-18-10-45-35-61_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/4c6c7a5d-17b2-41ff-932b-bf68b6dea086)
+![Screenshot_2025-12-18-10-43-55-88_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/1414811b-75f4-42e7-abd4-1d566cc9a6be)
 ![Screenshot_2025-12-15-12-40-03-93_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/2a77f211-9176-4972-b5f3-94f06b46512e)
 ![Screenshot_2025-12-15-12-39-31-80_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/e7ce2796-6dfe-437b-b13d-f25b52638032)
 ![Screenshot_2025-12-15-12-39-24-52_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/c53f29fc-8626-457a-b41e-8d98fe68981b)
