@@ -16,12 +16,16 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.text.util.Linkify
 import android.util.Base64
+import android.view.MenuItem
 import android.view.View
+import android.view.WindowManager // ADDED IMPORT
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 // GEMINI IMPORT
@@ -63,19 +67,16 @@ class MainActivity : AppCompatActivity() {
     private var isTesseractReady = false
     private var useOnlineOcr = false
     
-    // 0 = Offline App, 1 = Google Cloud, 2 = Gemini
+    // 0=Offline, 1=Cloud, 2=Gemini, 3=ChatAnywhere
     private var translationEngine = 0 
     
     private var currentBitmap: Bitmap? = null
     private lateinit var prefs: SharedPreferences
     private var pendingImportFilename: String = "" 
 
-    // --- FILE PICKER FOR LINKING DATABASES ---
     private val importDbLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
-            // Grant permanent permission to read this file
             contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            
             val selectedType = InscriptionParser.DatabaseType.values().find { type -> 
                 type.filename == pendingImportFilename 
             }
@@ -141,8 +142,19 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        prefs = getSharedPreferences("EDCS_PREFS", Context.MODE_PRIVATE)
+        // --- FIX STATUS BAR COLOR ---
+        // 1. Force window to draw backgrounds
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+        // 2. Clear any translucent flags that might override color
+        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+        // 3. Set the color to Purple
+        window.statusBarColor = Color.parseColor("#6200EE")
+        // ----------------------------
 
+        // HIDE DEFAULT TITLE (We use custom centered textview now)
+        title = ""
+
+        prefs = getSharedPreferences("EDCS_PREFS", Context.MODE_PRIVATE)
         useOnlineOcr = prefs.getBoolean("USE_ONLINE_OCR", false)
         translationEngine = prefs.getInt("TRANS_ENGINE", 0)
 
@@ -161,32 +173,15 @@ class MainActivity : AppCompatActivity() {
         parser.databaseUris = savedUris
 
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
-        toolbar.inflateMenu(R.menu.menu_main)
+        setSupportActionBar(toolbar) 
         
-        toolbar.menu.findItem(R.id.action_ocr_mode).isChecked = useOnlineOcr
-        updateEngineMenuState(toolbar.menu)
+        // HIDE DEFAULT TITLE AGAIN JUST TO BE SURE
+        supportActionBar?.setDisplayShowTitleEnabled(false)
 
-        toolbar.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                R.id.action_instructions -> { showInstructionsDialog(); true }
-                R.id.action_import_db -> { showImportSelectionDialog(); true }
-                R.id.action_ocr_mode -> {
-                    useOnlineOcr = !useOnlineOcr
-                    item.isChecked = useOnlineOcr
-                    prefs.edit().putBoolean("USE_ONLINE_OCR", useOnlineOcr).apply()
-                    Toast.makeText(this, "OCR: ${if (useOnlineOcr) "Online" else "Offline"}", Toast.LENGTH_SHORT).show()
-                    true
-                }
-                // SWITCH ENGINES
-                R.id.engine_offline -> { setTranslationEngine(0, item); true }
-                R.id.engine_cloud -> { setTranslationEngine(1, item); true }
-                R.id.engine_gemini -> { setTranslationEngine(2, item); true }
-                
-                // SET KEYS
-                R.id.action_set_cloud_key -> { showCloudApiKeyDialog(); true }
-                R.id.action_set_gemini_key -> { showGeminiApiKeyDialog(); true }
-                else -> false
-            }
+        // MENU ON TOP LEFT (Navigation Icon)
+        toolbar.navigationIcon = ContextCompat.getDrawable(this, R.drawable.ic_menu_hamburger)
+        toolbar.setNavigationOnClickListener { view ->
+            showLeftMenu(view)
         }
 
         etInclude = findViewById(R.id.etInclude)
@@ -240,7 +235,6 @@ class MainActivity : AppCompatActivity() {
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selectedDb = dbOptions[position]
-                // Try to load if linked
                 if (parser.databaseUris.containsKey(selectedDb) || File(filesDir, selectedDb.filename).exists()) {
                     progressBar.visibility = View.VISIBLE
                     tvStatus.text = "Loading..."
@@ -298,23 +292,57 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener { saveFileLauncher.launch("Output.txt") }
     }
 
-    private fun setTranslationEngine(engine: Int, item: android.view.MenuItem) {
+    // --- NEW LEFT MENU LOGIC ---
+    private fun showLeftMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menuInflater.inflate(R.menu.menu_main, popup.menu)
+        
+        // Restore Checkbox States
+        popup.menu.findItem(R.id.action_ocr_mode).isChecked = useOnlineOcr
+        popup.menu.findItem(R.id.engine_offline).isChecked = (translationEngine == 0)
+        popup.menu.findItem(R.id.engine_cloud).isChecked = (translationEngine == 1)
+        popup.menu.findItem(R.id.engine_gemini).isChecked = (translationEngine == 2)
+        popup.menu.findItem(R.id.engine_chatanywhere).isChecked = (translationEngine == 3)
+
+        popup.setOnMenuItemClickListener { item ->
+            handleMenuItem(item)
+            true
+        }
+        popup.show()
+    }
+
+    private fun handleMenuItem(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_instructions -> { showInstructionsDialog(); true }
+            R.id.action_import_db -> { showImportSelectionDialog(); true }
+            R.id.action_ocr_mode -> {
+                useOnlineOcr = !useOnlineOcr
+                prefs.edit().putBoolean("USE_ONLINE_OCR", useOnlineOcr).apply()
+                Toast.makeText(this, "OCR: ${if (useOnlineOcr) "Online" else "Offline"}", Toast.LENGTH_SHORT).show()
+                true
+            }
+            R.id.engine_offline -> { setTranslationEngine(0); true }
+            R.id.engine_cloud -> { setTranslationEngine(1); true }
+            R.id.engine_gemini -> { setTranslationEngine(2); true }
+            R.id.engine_chatanywhere -> { setTranslationEngine(3); true }
+            
+            R.id.action_set_cloud_key -> { showCloudApiKeyDialog(); true }
+            R.id.action_set_gemini_key -> { showGeminiApiKeyDialog(); true }
+            R.id.action_set_chatanywhere_key -> { showChatAnywhereApiKeyDialog(); true }
+            else -> false
+        }
+    }
+
+    private fun setTranslationEngine(engine: Int) {
         translationEngine = engine
         prefs.edit().putInt("TRANS_ENGINE", engine).apply()
-        val menu = findViewById<Toolbar>(R.id.toolbar).menu
-        updateEngineMenuState(menu)
         val name = when(engine) {
             0 -> "Google App (Offline)"
             1 -> "Google Cloud API"
-            else -> "Gemini AI"
+            2 -> "Gemini 2.5"
+            else -> "ChatAnywhere"
         }
         Toast.makeText(this, "Engine set to: $name", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun updateEngineMenuState(menu: android.view.Menu) {
-        menu.findItem(R.id.engine_offline).isChecked = (translationEngine == 0)
-        menu.findItem(R.id.engine_cloud).isChecked = (translationEngine == 1)
-        menu.findItem(R.id.engine_gemini).isChecked = (translationEngine == 2)
     }
 
     private fun translateText(text: String) {
@@ -335,6 +363,7 @@ class MainActivity : AppCompatActivity() {
             0 -> runOfflineTranslationIntent(cleaned, sourceLang)
             1 -> runOnlineTranslation(cleaned, sourceLang)
             2 -> runGeminiTranslation(cleaned)
+            3 -> runChatAnywhereTranslation(cleaned)
         }
     }
 
@@ -402,7 +431,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 2. GEMINI AI TRANSLATION (Uses Gemini Key + gemini-2.5-flash)
+    // 2. GEMINI AI TRANSLATION (ONE-OFF, FLASH 2.5)
     private fun runGeminiTranslation(text: String) {
         val apiKey = prefs.getString("GEMINI_API_KEY", "") ?: ""
         if (apiKey.isEmpty()) {
@@ -410,9 +439,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val loadingDialog = AlertDialog.Builder(this).setMessage("Asking Gemini...").show()
+        val loadingDialog = AlertDialog.Builder(this).setMessage("Asking Gemini (2.5)...").show()
 
-        // --- WORKING MODEL ---
         val generativeModel = GenerativeModel(
             modelName = "gemini-2.5-flash",
             apiKey = apiKey
@@ -443,9 +471,114 @@ class MainActivity : AppCompatActivity() {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     loadingDialog.dismiss()
+                    
+                    val errorMsg = e.localizedMessage ?: ""
+                    if (errorMsg.contains("503") || errorMsg.contains("MissingFieldException")) {
+                         AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Server Busy (503)")
+                            .setMessage("Gemini 2.5 is currently overloaded.\n\nWould you like to try again?")
+                            .setPositiveButton("Retry") { _, _ ->
+                                runGeminiTranslation(text)
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    } else {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Gemini Error")
+                            .setMessage("Error: $errorMsg")
+                            .setPositiveButton("OK", null)
+                            .show()
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. CHATANYWHERE (GPT-3.5/GPT-4 Free)
+    private fun runChatAnywhereTranslation(text: String) {
+        val apiKey = prefs.getString("CHATANYWHERE_KEY", "") ?: ""
+        if (apiKey.isEmpty()) {
+            Toast.makeText(this, "ChatAnywhere Key missing! Set it in Menu.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val loadingDialog = AlertDialog.Builder(this).setMessage("Asking ChatAnywhere...").show()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val jsonRequest = JSONObject()
+                jsonRequest.put("model", "gpt-3.5-turbo") 
+                
+                val messages = org.json.JSONArray()
+                
+                val systemMsg = JSONObject()
+                systemMsg.put("role", "system")
+                val prompt = """
+                    You are an expert in Ancient Latin and Greek Epigraphy.
+                    Translate the following text into English.
+                    
+                    Notes:
+                    - Expand abbreviations (e.g., 'D M' -> 'Dis Manibus').
+                    - Text in brackets [] or () is restored.
+                    - Provide a formal, academic translation.
+                """.trimIndent()
+                systemMsg.put("content", prompt)
+                messages.put(systemMsg)
+
+                val userMsg = JSONObject()
+                userMsg.put("role", "user")
+                userMsg.put("content", text)
+                messages.put(userMsg)
+
+                jsonRequest.put("messages", messages)
+
+                val url = URL("https://api.chatanywhere.tech/v1/chat/completions")
+                val conn = url.openConnection() as HttpsURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer $apiKey")
+                conn.doOutput = true
+                
+                val writer = OutputStreamWriter(conn.outputStream)
+                writer.write(jsonRequest.toString())
+                writer.flush()
+                writer.close()
+
+                if (conn.responseCode == 200) {
+                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                    val responseText = reader.readText()
+                    reader.close()
+
+                    val jsonResponse = JSONObject(responseText)
+                    val choices = jsonResponse.getJSONArray("choices")
+                    val translatedText = choices.getJSONObject(0)
+                        .getJSONObject("message")
+                        .getString("content")
+
+                    withContext(Dispatchers.Main) {
+                        loadingDialog.dismiss()
+                        showTranslationResult(translatedText, "ChatAnywhere (GPT)")
+                    }
+                } else {
+                    val reader = BufferedReader(InputStreamReader(conn.errorStream ?: conn.inputStream))
+                    val errorText = reader.readText()
+                    reader.close()
+                    
+                    withContext(Dispatchers.Main) {
+                        loadingDialog.dismiss()
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("ChatAnywhere Error")
+                            .setMessage("Error ${conn.responseCode}:\n$errorText")
+                            .setPositiveButton("OK", null)
+                            .show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    loadingDialog.dismiss()
                     AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Gemini Error")
-                        .setMessage("Error: ${e.localizedMessage}")
+                        .setTitle("Connection Error")
+                        .setMessage(e.localizedMessage)
                         .setPositiveButton("OK", null)
                         .show()
                 }
@@ -466,7 +599,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // --- FIX FOR MISSING MENU: BUTTON BASED SELECTION ---
     private fun showTextSelectionDialog(text: String) {
         val textView = TextView(this)
         textView.text = text
@@ -475,10 +607,9 @@ class MainActivity : AppCompatActivity() {
         textView.setTextColor(Color.BLACK)
         textView.setTextIsSelectable(true)
 
-        // Floating Menu Attempt (Backwards Compatibility)
         textView.customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
             override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
-                menu.add(0, 100, 0, "EDCS Translate")
+                menu.add(0, 100, 0, "EPISEARCH Translate")
                     .setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_IF_ROOM)
                 return true
             }
@@ -494,7 +625,6 @@ class MainActivity : AppCompatActivity() {
             override fun onDestroyActionMode(mode: android.view.ActionMode) {}
         }
 
-        // PERMANENT BUTTON FIX
         AlertDialog.Builder(this)
             .setTitle("Select Text")
             .setView(textView)
@@ -520,7 +650,6 @@ class MainActivity : AppCompatActivity() {
         val selectedText = if (start != end) {
             textView.text.subSequence(start, end).toString()
         } else {
-            // If nothing selected, translate everything
             textView.text.toString()
         }
 
@@ -531,7 +660,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- DIALOGS ---
     private fun showCloudApiKeyDialog() {
         val input = EditText(this)
         input.hint = "Paste Google Cloud API Key"
@@ -562,6 +690,22 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun showChatAnywhereApiKeyDialog() {
+        val input = EditText(this)
+        input.hint = "Paste ChatAnywhere Key (sk-...)"
+        input.setText(prefs.getString("CHATANYWHERE_KEY", ""))
+        AlertDialog.Builder(this)
+            .setTitle("Set ChatAnywhere Key")
+            .setMessage("Get key from: github.com/chatanywhere/GPT_API_free")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                prefs.edit().putString("CHATANYWHERE_KEY", input.text.toString().trim()).apply()
+                Toast.makeText(this, "ChatAnywhere Key Saved!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun showInstructionsDialog() {
         val message = """
             Android apk for searching Latin and Greek inscriptions and papyri
@@ -571,19 +715,23 @@ class MainActivity : AppCompatActivity() {
             Greek Inscriptions: https://inscriptions.packhum.org
             Papyri: https://papyri.info
 
-            Use the dropdown menu at the top to choose databases. It takes a few seconds to load.
+            Use Link Database Files in the top left menu to link the apk to the databases stored on your device.
+
+            Use the dropdown menu at the top to choose databases.
 
             Use the first search bar to look for inscriptions that contain the keywords you want, and the second one for inscriptions without the keywords. Separate multiple keywords with '&&'. Keywords will be highlighted in red in the search results.
 
-            The scan button allows you to take a photo or load a local image for OCR.
+            The scan button allows you to take a photo or load a local image for OCR. Offline recognition uses the Tessera library, and it converts the image to black and white before recognition to reduce background noise (currently, the recognition quality is poor). Online recognition uses Google's Cloud Vision API, offering much better results; free to use for 1000 times every month. The API can be obtained from the Google Cloud console. You can set the API key in the top left menu.
             
             TRANSLATION ENGINES:
             1. Google App (Offline): Uses the installed Google Translate app. Requires Language Packs.
             2. Google Cloud API (Online): Standard machine translation. Fast. Uses 'Cloud API Key'.
-            3. Gemini AI (Smart): Context-aware translation for epigraphy. Uses 'Gemini API Key'.
+            3. Gemini AI: Fast, Google-powered. Uses 'Gemini API Key'.
+            4. ChatAnywhere: Free GPT-3.5/4. Uses 'ChatAnywhere Key'.
 
-            You can set your API Keys in the top-right menu.
+            You can set your API Keys in the top-left menu.
         """.trimIndent()
+        
         val alert = AlertDialog.Builder(this)
             .setTitle("Instructions")
             .setMessage(message)
@@ -631,7 +779,6 @@ class MainActivity : AppCompatActivity() {
         tvTranslation.visibility = View.GONE
         progressBar.visibility = View.VISIBLE
         
-        // OCR uses Cloud Key
         if (useOnlineOcr) {
             ivPreview.setImageBitmap(safeBitmap) 
             tvStatus.text = "Sending to Google Cloud..."
@@ -670,7 +817,7 @@ class MainActivity : AppCompatActivity() {
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.doOutput = true
                 val writer = OutputStreamWriter(conn.outputStream)
-                writer.write(jsonRequest)
+                writer.write(jsonRequest.toString())
                 writer.flush()
                 writer.close()
                 if (conn.responseCode == 200) {

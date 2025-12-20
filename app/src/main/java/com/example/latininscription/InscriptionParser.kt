@@ -11,7 +11,6 @@ import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.regex.Pattern
-import java.util.zip.ZipInputStream
 
 data class Inscription(
     val id: String, 
@@ -31,14 +30,10 @@ class InscriptionParser(private val context: Context) {
         GREEK_PAPY("greek papyrus.txt", "Greek Papyri")
     }
 
-    // URI Map (Required for MainActivity compatibility)
     var databaseUris: Map<DatabaseType, Uri> = emptyMap()
-
-    // HIGH PERFORMANCE: Store everything in RAM
-    private var rawRecords: ArrayList<String> = ArrayList()
-    private var cleanRecords: ArrayList<String> = ArrayList()
     private var currentType: DatabaseType? = null
 
+    // Regex to remove tags for the final clean display
     private val tagRegex = Regex("<(\\p{L}+)=\\p{L}+>")
     private val cleanupRegex = Regex("[\\\\[\\\\])(}{/<>,\\-]")
 
@@ -46,52 +41,80 @@ class InscriptionParser(private val context: Context) {
         return raw.replace(tagRegex, "$1").replace(cleanupRegex, "")
     }
 
+    // NEW: Converts simple keyword "galliarum" into a smart Regex that matches "[g]alliarum"
+    private fun toFuzzyPattern(keyword: String): Pattern {
+        val sb = StringBuilder()
+        for (char in keyword) {
+            // Escape special regex characters if user types them
+            if ("[](){}.*+?^$|\\".contains(char)) {
+                sb.append("\\").append(char)
+            } else {
+                sb.append(char)
+            }
+            // Allow Epigraphic brackets between any letters: [] () <>
+            // This means "g" can be followed by garbage brackets before "a"
+            sb.append("[\\(\\)\\[\\]<>]*")
+        }
+        return Pattern.compile(sb.toString(), Pattern.CASE_INSENSITIVE)
+    }
+
     suspend fun loadDatabase(dbType: DatabaseType) = withContext(Dispatchers.IO) {
-        // If this exact DB is already loaded in RAM, skip loading (Instant Switch)
-        if (currentType == dbType && rawRecords.isNotEmpty()) return@withContext
-
-        // Clear old memory
-        rawRecords.clear()
-        cleanRecords.clear()
-        System.gc() // Suggest garbage collection to free up space
-
-        var inputStream: InputStream? = null
-
-        // 1. Try Loading from Linked URI (Priority)
-        val uri = databaseUris[dbType]
-        if (uri != null) {
+        var found = false
+        if (databaseUris.containsKey(dbType)) {
             try {
-                inputStream = context.contentResolver.openInputStream(uri)
-            } catch (e: Exception) {
-                // If URI fails (e.g., file moved), fall through to internal storage
-            }
+                val uri = databaseUris[dbType]!!
+                context.contentResolver.openInputStream(uri)?.close()
+                found = true
+            } catch (e: Exception) { }
         }
-
-        // 2. Try Internal Storage (Fallback)
-        if (inputStream == null) {
+        if (!found) {
             val file = File(context.filesDir, dbType.filename)
-            if (file.exists()) {
-                inputStream = FileInputStream(file)
-            }
+            if (file.exists()) found = true
         }
-
-        if (inputStream == null) {
+        if (!found) {
             throw FileNotFoundException("Database not found for ${dbType.displayName}.\nPlease use 'Link Database File' in the menu.")
         }
+        currentType = dbType
+    }
 
+    suspend fun search(dbType: DatabaseType, includePatterns: List<String>, excludePatterns: List<String>): List<Inscription> = withContext(Dispatchers.IO) {
+        val results = ArrayList<Inscription>()
+        var inputStream: InputStream? = null
+        val uri = databaseUris[dbType]
+        
+        if (uri != null) {
+            try { inputStream = context.contentResolver.openInputStream(uri) } catch (e: Exception) {}
+        }
+        if (inputStream == null) {
+            val file = File(context.filesDir, dbType.filename)
+            if (file.exists()) inputStream = FileInputStream(file)
+        }
+
+        if (inputStream == null) return@withContext emptyList()
+
+        // SPEED FIX: Compile "Smart Patterns" ONCE.
+        // We do NOT clean the database text inside the loop anymore (too slow).
+        // Instead, we make the search query "smart" enough to handle the raw brackets.
+        val includeRegexes = includePatterns.map { toFuzzyPattern(it) }
+        val excludeRegexes = excludePatterns.map { toFuzzyPattern(it) }
+
+        val reader = BufferedReader(InputStreamReader(inputStream), 8192)
         try {
-            val reader = BufferedReader(InputStreamReader(inputStream), 8192) // 8KB Buffer
-
             val currentRecord = StringBuilder()
             var line = reader.readLine()
 
-            // READ EVERYTHING INTO RAM
             while (line != null) {
                 if (line.isBlank()) {
                     if (currentRecord.isNotBlank()) {
                         val raw = currentRecord.toString()
-                        rawRecords.add(raw)
-                        cleanRecords.add(cleanRecord(raw))
+                        
+                        // FAST CHECK on RAW text
+                        if (checkMatch(raw, includeRegexes, excludeRegexes)) {
+                            // Only clean it IF it's a match (saves massive CPU)
+                            val clean = cleanRecord(raw)
+                            results.add(parseSingleRecord(raw, clean, dbType))
+                            if (results.size >= 500) break
+                        }
                         currentRecord.setLength(0) 
                     }
                 } else {
@@ -99,85 +122,66 @@ class InscriptionParser(private val context: Context) {
                 }
                 line = reader.readLine()
             }
-            // Add the last record
-            if (currentRecord.isNotBlank()) {
+            if (currentRecord.isNotBlank() && results.size < 500) {
                 val raw = currentRecord.toString()
-                rawRecords.add(raw)
-                cleanRecords.add(cleanRecord(raw))
+                if (checkMatch(raw, includeRegexes, excludeRegexes)) {
+                    val clean = cleanRecord(raw)
+                    results.add(parseSingleRecord(raw, clean, dbType))
+                }
             }
+        } finally {
             reader.close()
-            currentType = dbType
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            throw e
         }
+        return@withContext results
     }
 
-    suspend fun search(dbType: DatabaseType, includePatterns: List<String>, excludePatterns: List<String>): List<Inscription> = withContext(Dispatchers.Default) {
-        val result = mutableListOf<Inscription>()
+    private fun checkMatch(raw: String, includes: List<Pattern>, excludes: List<Pattern>): Boolean {
+        if (raw.isEmpty()) return false
         
-        if (rawRecords.isEmpty()) return@withContext emptyList()
-
-        // Compile regexes once for speed
-        val includeRegexes = includePatterns.mapNotNull { try { Pattern.compile(it, Pattern.CASE_INSENSITIVE) } catch (e: Exception) { null } }
-        val excludeRegexes = excludePatterns.mapNotNull { try { Pattern.compile(it, Pattern.CASE_INSENSITIVE) } catch (e: Exception) { null } }
-
-        // FAST RAM LOOP
-        for (i in cleanRecords.indices) {
-            val cleanText = cleanRecords[i]
-            var match = true
-            
-            // Check Includes
-            for (p in includeRegexes) {
-                if (!p.matcher(cleanText).find()) {
-                    match = false; break
-                }
-            }
-            // Check Excludes
-            if (match && excludeRegexes.isNotEmpty()) {
-                for (p in excludeRegexes) {
-                    if (p.matcher(cleanText).find()) {
-                        match = false; break
-                    }
-                }
-            }
-            
-            if (match) {
-                result.add(parseSingleRecord(rawRecords[i], cleanText, dbType))
-                // Optional: Limit results to avoid UI lag if user searches for "e"
-                // if (result.size >= 2000) break 
-            }
+        // Find ALL include patterns
+        for (p in includes) {
+            if (!p.matcher(raw).find()) return false
         }
-        return@withContext result
+        // Find NO exclude patterns
+        for (p in excludes) {
+            if (p.matcher(raw).find()) return false
+        }
+        return true
     }
 
     private fun parseSingleRecord(raw: String, clean: String, dbType: DatabaseType): Inscription {
-        val lines = raw.split("\n")
+        val lines = raw.split("\n").map { it.trim() }.filter { it.isNotBlank() }
         
         if (dbType == DatabaseType.LATIN) {
-            val n = if (lines.size > 1 && lines[1].contains("Datierung:")) 0 else 1
+            val id = lines.firstOrNull() ?: ""
             
-            val id = lines.getOrElse(0) { "" }.trim()
-            val date = if (n == 0) lines.getOrElse(1) { "" }.trim() else ""
-            val location = lines.getOrElse(3 - n) { "" }.trim()
-            
-            val rawText = lines.getOrElse(4 - n) { "" }
+            val dateLine = lines.find { it.startsWith("Datierung:") } ?: ""
+            val provLine = lines.find { it.startsWith("Provinz:") } ?: ""
+            val ortLine = lines.find { it.startsWith("Ort:") } ?: ""
+            val location = "$provLine $ortLine".trim()
+
+            // Smart Filter: Skip Metadata lines to find real text
+            val metadataPrefixes = listOf(
+                "Publikation:", "Datierung:", "EDCS-ID:", 
+                "Provinz:", "Ort:", "Material:", 
+                "Inschriftengattung", "Personenstatus", "Militär", 
+                "Religion", "Region"
+            )
+
+            val textLines = lines.filterIndexed { index, line ->
+                index > 0 && 
+                !metadataPrefixes.any { line.startsWith(it) }
+            }
+
+            val rawText = textLines.joinToString("\n")
             val formattedText = rawText.replace("/", "\n")
                                        .replace(Regex("\\n+"), "\n")
                                        .trim()
 
-            val ref1 = lines.getOrElse(5 - n) { "" }.trim()
-            val ref2 = lines.getOrElse(6 - n) { "" }.trim()
-
-            return Inscription(id, date, location, formattedText, ref1, ref2, clean)
+            return Inscription(id, dateLine, location, formattedText, "", "", clean)
         } else {
-            val id = lines.getOrElse(0) { "Item" }.trim()
-            val fullText = if (lines.size > 1) {
-                lines.drop(1).joinToString("\n")
-            } else {
-                lines.getOrElse(0) { "" }
-            }
+            val id = lines.firstOrNull() ?: "Item"
+            val fullText = if (lines.size > 1) lines.drop(1).joinToString("\n") else ""
             return Inscription(id, "", "", fullText.trim(), "", "", searchableText = clean)
         }
     }

@@ -4,7 +4,7 @@
 
     <item
         android:id="@+id/action_instructions"
-        android:title="Guide"
+        android:title="Help/Guide"
         app:showAsAction="never" />
 
     <item
@@ -35,12 +35,16 @@
                 android:id="@+id/engine_gemini"
                 android:title="Gemini AI (Smart)"
                 android:checkable="true" />
+            <item
+                android:id="@+id/engine_chatanywhere"
+                android:title="ChatAnywhere (GPT)"
+                android:checkable="true" />
         </menu>
     </item>
 
     <item
         android:id="@+id/action_set_cloud_key"
-        android:title="Set Cloud API Key (Vision)"
+        android:title="Set Cloud API Key"
         app:showAsAction="never" />
 
     <item
@@ -48,4 +52,8 @@
         android:title="Set Gemini API Key"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/action_set_chatanywhere_key"
+        android:title="Set ChatAnywhere Key"
+        app:showAsAction="never" />
 </menu>
