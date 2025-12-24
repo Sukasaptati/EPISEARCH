@@ -1,6 +1,8 @@
 package com.example.latininscription
 
 import android.app.Activity
+import android.content.ClipData 
+import android.content.ClipboardManager 
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -18,7 +20,7 @@ import android.text.util.Linkify
 import android.util.Base64
 import android.view.MenuItem
 import android.view.View
-import android.view.WindowManager // ADDED IMPORT
+import android.view.WindowManager
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -28,9 +30,24 @@ import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+
 // GEMINI IMPORT
 import com.google.ai.client.generativeai.GenerativeModel
 import com.googlecode.tesseract.android.TessBaseAPI
+
+// RETROFIT IMPORTS
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.POST
+// OKHTTP IMPORTS (For Timeout Fix)
+import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
+import java.util.concurrent.TimeUnit
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -60,19 +77,48 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var layoutOcrResult: LinearLayout
     private lateinit var ivPreview: ImageView
-    private lateinit var tvOcrText: TextView
+    
+    // Using EditText to match your layout
+    private lateinit var etOcrText: EditText 
+    
     private lateinit var tvTranslation: TextView 
+
+    // BUTTONS
+    private lateinit var btnSpecialistScan: ImageButton
+    private lateinit var btnRestore: ImageButton
+    private lateinit var btnSaveImage: ImageButton
+    private lateinit var btnTranslate: ImageButton
+    private lateinit var btnCloseOcr: ImageButton
 
     private lateinit var tessApi: TessBaseAPI
     private var isTesseractReady = false
     private var useOnlineOcr = false
-    
-    // 0=Offline, 1=Cloud, 2=Gemini, 3=ChatAnywhere
     private var translationEngine = 0 
     
     private var currentBitmap: Bitmap? = null
     private lateinit var prefs: SharedPreferences
     private var pendingImportFilename: String = "" 
+
+    // --- UPDATED API CLIENT (TIMEOUT FIX) ---
+    private val api: ApiService by lazy {
+        val url = prefs.getString("AENEAS_URL", "https://placeholder.com") ?: "https://placeholder.com"
+        val validUrl = if (url.startsWith("http")) url else "https://placeholder.com"
+        
+        // We create a custom client that waits 90 seconds instead of the default 10
+        val client = OkHttpClient.Builder()
+            .connectTimeout(90, TimeUnit.SECONDS)
+            .readTimeout(90, TimeUnit.SECONDS)
+            .writeTimeout(90, TimeUnit.SECONDS)
+            .build()
+        
+        Retrofit.Builder()
+            .baseUrl(validUrl)
+            .client(client) // Apply the custom client
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(ApiService::class.java)
+    }
+    // ---------------------------------------
 
     private val importDbLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let {
@@ -142,23 +188,16 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // --- FIX STATUS BAR COLOR ---
-        // 1. Force window to draw backgrounds
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-        // 2. Clear any translucent flags that might override color
         window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
-        // 3. Set the color to Purple
         window.statusBarColor = Color.parseColor("#6200EE")
-        // ----------------------------
 
-        // HIDE DEFAULT TITLE (We use custom centered textview now)
         title = ""
 
         prefs = getSharedPreferences("EDCS_PREFS", Context.MODE_PRIVATE)
         useOnlineOcr = prefs.getBoolean("USE_ONLINE_OCR", false)
         translationEngine = prefs.getInt("TRANS_ENGINE", 0)
 
-        // RESTORE SAVED DATABASE LINKS
         val savedUris = mutableMapOf<InscriptionParser.DatabaseType, Uri>()
         InscriptionParser.DatabaseType.values().forEach { type ->
             val uriString = prefs.getString("URI_${type.name}", null)
@@ -174,11 +213,8 @@ class MainActivity : AppCompatActivity() {
 
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar) 
-        
-        // HIDE DEFAULT TITLE AGAIN JUST TO BE SURE
         supportActionBar?.setDisplayShowTitleEnabled(false)
 
-        // MENU ON TOP LEFT (Navigation Icon)
         toolbar.navigationIcon = ContextCompat.getDrawable(this, R.drawable.ic_menu_hamburger)
         toolbar.setNavigationOnClickListener { view ->
             showLeftMenu(view)
@@ -195,28 +231,58 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         layoutOcrResult = findViewById(R.id.layoutOcrResult)
         ivPreview = findViewById(R.id.ivPreview)
-        tvOcrText = findViewById(R.id.tvOcrText)
+        
+        etOcrText = findViewById(R.id.etOcrText) 
         tvTranslation = findViewById(R.id.tvTranslation)
 
-        findViewById<ImageButton>(R.id.btnCloseOcr).setOnClickListener {
+        btnSpecialistScan = findViewById(R.id.btnSpecialistScan)
+        btnRestore = findViewById(R.id.btnRestore)
+        btnSaveImage = findViewById(R.id.btnSaveImage)
+        btnTranslate = findViewById(R.id.btnTranslate)
+        btnCloseOcr = findViewById(R.id.btnCloseOcr)
+
+        btnCloseOcr.setOnClickListener {
             layoutOcrResult.visibility = View.GONE
             tvTranslation.visibility = View.GONE
             ivPreview.setImageDrawable(null)
-            tvOcrText.text = ""
+            etOcrText.setText("")
             currentBitmap = null
         }
 
-        findViewById<ImageButton>(R.id.btnSaveImage).setOnClickListener {
+        btnSaveImage.setOnClickListener {
             currentBitmap?.let { bmp -> saveImageToGallery(bmp) } 
                 ?: Toast.makeText(this, "No image to save", Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<ImageButton>(R.id.btnTranslate).setOnClickListener {
-            val text = tvOcrText.text.toString()
+        btnTranslate.setOnClickListener {
+            val text = etOcrText.text.toString()
             if (text.isNotBlank() && text != "Scanned text...") {
                 translateText(text)
             } else {
                 Toast.makeText(this, "No text to translate", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnSpecialistScan.setOnClickListener {
+            if (currentBitmap != null) {
+                runPapyTwin(currentBitmap!!)
+            } else {
+                Toast.makeText(this, "No image loaded", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnRestore.setOnClickListener {
+            val text = etOcrText.text.toString()
+            if (text.isNotBlank()) {
+                val currentUrl = prefs.getString("AENEAS_URL", "") ?: ""
+                if (currentUrl.isEmpty()) {
+                    Toast.makeText(this, "Please set Server URL in Menu first!", Toast.LENGTH_LONG).show()
+                    showAeneasUrlDialog()
+                } else {
+                    runRestoration(text)
+                }
+            } else {
+                Toast.makeText(this, "No text to restore", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -292,12 +358,10 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener { saveFileLauncher.launch("Output.txt") }
     }
 
-    // --- NEW LEFT MENU LOGIC ---
     private fun showLeftMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
         popup.menuInflater.inflate(R.menu.menu_main, popup.menu)
         
-        // Restore Checkbox States
         popup.menu.findItem(R.id.action_ocr_mode).isChecked = useOnlineOcr
         popup.menu.findItem(R.id.engine_offline).isChecked = (translationEngine == 0)
         popup.menu.findItem(R.id.engine_cloud).isChecked = (translationEngine == 1)
@@ -315,6 +379,9 @@ class MainActivity : AppCompatActivity() {
         return when (item.itemId) {
             R.id.action_instructions -> { showInstructionsDialog(); true }
             R.id.action_import_db -> { showImportSelectionDialog(); true }
+            
+            R.id.action_set_server_url -> { showAeneasUrlDialog(); true }
+
             R.id.action_ocr_mode -> {
                 useOnlineOcr = !useOnlineOcr
                 prefs.edit().putBoolean("USE_ONLINE_OCR", useOnlineOcr).apply()
@@ -367,7 +434,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 0. OFFLINE APP INTENT
+    // 0. OFFLINE
     private fun runOfflineTranslationIntent(text: String, lang: String) {
         try {
             val encodedText = URLEncoder.encode(text, "UTF-8")
@@ -379,7 +446,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 1. CLOUD TRANSLATION API (Uses Cloud Key)
+    // 1. CLOUD API
     private fun runOnlineTranslation(text: String, sourceLang: String) {
         val apiKey = prefs.getString("GOOGLE_API_KEY", "") ?: ""
         if (apiKey.isEmpty()) {
@@ -431,7 +498,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 2. GEMINI AI TRANSLATION (ONE-OFF, FLASH 2.5)
+    // 2. GEMINI AI
     private fun runGeminiTranslation(text: String) {
         val apiKey = prefs.getString("GEMINI_API_KEY", "") ?: ""
         if (apiKey.isEmpty()) {
@@ -471,30 +538,17 @@ class MainActivity : AppCompatActivity() {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     loadingDialog.dismiss()
-                    
-                    val errorMsg = e.localizedMessage ?: ""
-                    if (errorMsg.contains("503") || errorMsg.contains("MissingFieldException")) {
-                         AlertDialog.Builder(this@MainActivity)
-                            .setTitle("Server Busy (503)")
-                            .setMessage("Gemini 2.5 is currently overloaded.\n\nWould you like to try again?")
-                            .setPositiveButton("Retry") { _, _ ->
-                                runGeminiTranslation(text)
-                            }
-                            .setNegativeButton("Cancel", null)
-                            .show()
-                    } else {
-                        AlertDialog.Builder(this@MainActivity)
-                            .setTitle("Gemini Error")
-                            .setMessage("Error: $errorMsg")
-                            .setPositiveButton("OK", null)
-                            .show()
-                    }
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Gemini Error")
+                        .setMessage("Error: ${e.localizedMessage}")
+                        .setPositiveButton("OK", null)
+                        .show()
                 }
             }
         }
     }
 
-    // 3. CHATANYWHERE (GPT-3.5/GPT-4 Free)
+    // 3. CHATANYWHERE
     private fun runChatAnywhereTranslation(text: String) {
         val apiKey = prefs.getString("CHATANYWHERE_KEY", "") ?: ""
         if (apiKey.isEmpty()) {
@@ -591,8 +645,8 @@ class MainActivity : AppCompatActivity() {
             .setTitle(title)
             .setMessage(text)
             .setPositiveButton("Copy") { _, _ ->
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val clip = android.content.ClipData.newPlainText("Translation", text)
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("Translation", text)
                 clipboard.setPrimaryClip(clip)
             }
             .setNegativeButton("Close", null)
@@ -708,28 +762,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun showInstructionsDialog() {
         val message = """
-            Android apk for searching Latin and Greek inscriptions and papyri
-
-            Sources
-            Latin Epigraphy: http://db.edcs.eu/epigr/epi.php
-            Greek Inscriptions: https://inscriptions.packhum.org
-            Papyri: https://papyri.info
-
+            Android apk for searching Latin and Greek inscriptions and papyri.
+            
             Use Link Database Files in the top left menu to link the apk to the databases stored on your device.
 
             Use the dropdown menu at the top to choose databases.
-
+            
             Use the first search bar to look for inscriptions that contain the keywords you want, and the second one for inscriptions without the keywords. Separate multiple keywords with '&&'. Keywords will be highlighted in red in the search results.
+            
+            
+            The scan button allows you to take a photo or load a local image for OCR. Your can choose between offline OCR, which uses tesseract library, and online OCR, which uses google cloud vision. The offline OCR converts the image to black and white before recogntion so as to reduce background noise. Online recognition uses Google cloud vision, offering much better results, and is free for 1000 times per month. The API can be obtained from Google Cloud console. You can set the api key in the menu.
 
-            The scan button allows you to take a photo or load a local image for OCR. Offline recognition uses the Tessera library, and it converts the image to black and white before recognition to reduce background noise (currently, the recognition quality is poor). Online recognition uses Google's Cloud Vision API, offering much better results; free to use for 1000 times every month. The API can be obtained from the Google Cloud console. You can set the API key in the top left menu.
+            Aeneas ai model is integrated to help restore broken inscriptions after OCR. Papytwins model is used to recognize papyri.
+
             
             TRANSLATION ENGINES:
-            1. Google App (Offline): Uses the installed Google Translate app. Requires Language Packs.
-            2. Google Cloud API (Online): Standard machine translation. Fast. Uses 'Cloud API Key'.
-            3. Gemini AI: Fast, Google-powered. Uses 'Gemini API Key'.
-            4. ChatAnywhere: Free GPT-3.5/4. Uses 'ChatAnywhere Key'.
+            1. Google App (Offline): Basic translation.
+            2. Google Cloud API (Online): Standard machine translation.
+            3. Gemini AI (Smart): Advanced, context-aware. Uses Gemini api key.
+            4. GPT: Uses free gpt 3.5/4 with free key by ChatAnywhere.
 
-            You can set your API Keys in the top-left menu.
+            Set API Keys in the menu.
         """.trimIndent()
         
         val alert = AlertDialog.Builder(this)
@@ -782,7 +835,7 @@ class MainActivity : AppCompatActivity() {
         if (useOnlineOcr) {
             ivPreview.setImageBitmap(safeBitmap) 
             tvStatus.text = "Sending to Google Cloud..."
-            tvOcrText.text = "Uploading..."
+            etOcrText.setText("Uploading...")
             runCloudVision(safeBitmap)
         } else {
             tvStatus.text = "Optimizing Image..."
@@ -801,7 +854,7 @@ class MainActivity : AppCompatActivity() {
         val apiKey = prefs.getString("GOOGLE_API_KEY", "") ?: ""
         if (apiKey.isEmpty()) {
             Toast.makeText(this, "Cloud Key missing! Set it in Menu.", Toast.LENGTH_LONG).show()
-            tvOcrText.text = "Error: Missing API Key."
+            etOcrText.setText("Error: Missing API Key.")
             progressBar.visibility = View.GONE
             return
         }
@@ -831,26 +884,26 @@ class MainActivity : AppCompatActivity() {
                         if (first.has("fullTextAnnotation")) {
                             val text = first.getJSONObject("fullTextAnnotation").getString("text")
                             withContext(Dispatchers.Main) {
-                                tvOcrText.text = text
+                                etOcrText.setText(text)
                                 tvStatus.text = "Google OCR Complete"
                                 progressBar.visibility = View.GONE
                             }
                         } else {
                              withContext(Dispatchers.Main) {
-                                tvOcrText.text = "No text found."
+                                etOcrText.setText("No text found.")
                                 progressBar.visibility = View.GONE
                             }
                         }
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        tvOcrText.text = "Error: ${conn.responseCode}"
+                        etOcrText.setText("Error: ${conn.responseCode}")
                         progressBar.visibility = View.GONE
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    tvOcrText.text = "Error: ${e.message}"
+                    etOcrText.setText("Error: ${e.message}")
                     progressBar.visibility = View.GONE
                 }
             }
@@ -945,10 +998,14 @@ class MainActivity : AppCompatActivity() {
                 if (!dir.exists()) dir.mkdirs()
                 copyAssetFile("tessdata/grc.traineddata", dataPath + "grc.traineddata")
                 copyAssetFile("tessdata/lat.traineddata", dataPath + "lat.traineddata")
-                val success = tessApi.init(getExternalFilesDir(null)?.absolutePath, "grc+lat")
-                withContext(Dispatchers.Main) {
-                    if (success) isTesseractReady = true
-                    else tvStatus.text = "OCR Init Failed"
+                
+                val basePath = getExternalFilesDir(null)?.absolutePath
+                if (basePath != null) {
+                    val success = tessApi.init(basePath, "grc+lat")
+                    withContext(Dispatchers.Main) {
+                        if (success) isTesseractReady = true
+                        else tvStatus.text = "OCR Init Failed"
+                    }
                 }
             } catch (e: Exception) { e.printStackTrace() }
         }
@@ -967,7 +1024,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun runTesseract(bitmap: Bitmap) {
         if (!isTesseractReady) return
-        tvOcrText.text = "Reading text..."
+        etOcrText.setText("Reading text...")
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 tessApi.setImage(bitmap)
@@ -975,12 +1032,12 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     progressBar.visibility = View.GONE
                     tvStatus.text = "Scan Complete"
-                    tvOcrText.text = if (result.isBlank()) "No text found." else result
+                    etOcrText.setText(if (result.isBlank()) "No text found." else result)
                 }
             } catch (e: Exception) { 
                 withContext(Dispatchers.Main) {
                     progressBar.visibility = View.GONE
-                    tvOcrText.text = "Error: ${e.message}"
+                    etOcrText.setText("Error: ${e.message}")
                 }
             }
         }
@@ -993,4 +1050,127 @@ class MainActivity : AppCompatActivity() {
             tessApi.recycle()
         }
     }
+
+    // --- HELPER METHODS ---
+
+    private fun showAeneasUrlDialog() {
+        val input = EditText(this)
+        input.hint = "e.g. https://...ngrok-free.dev"
+        input.setText(prefs.getString("AENEAS_URL", ""))
+        AlertDialog.Builder(this)
+            .setTitle("Set Colab Server URL")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                var url = input.text.toString().trim()
+                if (url.endsWith("/")) url = url.substring(0, url.length - 1)
+                prefs.edit().putString("AENEAS_URL", url).apply()
+                Toast.makeText(this, "URL Saved", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun setLoading(isLoading: Boolean) {
+        if (isLoading) {
+            progressBar.visibility = View.VISIBLE
+            btnSpecialistScan.isEnabled = false
+            btnSpecialistScan.alpha = 0.5f
+        } else {
+            progressBar.visibility = View.GONE
+            btnSpecialistScan.isEnabled = true
+            btnSpecialistScan.alpha = 1.0f
+        }
+    }
+
+    private fun convertBitmapToBase64(bitmap: Bitmap): String {
+        val stream = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+        return Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+    }
+
+    private fun runPapyTwin(bitmap: Bitmap) {
+        setLoading(true)
+        val base64Image = convertBitmapToBase64(bitmap)
+        
+        api.scanPapyTwin(OcrRequest(base64Image)).enqueue(object : Callback<OcrResponse> {
+            override fun onResponse(call: Call<OcrResponse>, response: Response<OcrResponse>) {
+                setLoading(false)
+                if (response.isSuccessful && response.body() != null) {
+                    etOcrText.setText(response.body()!!.text)
+                    Toast.makeText(this@MainActivity, "PapyTwin Complete", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Server Error: ${response.code()}", Toast.LENGTH_SHORT).show()
+                }
+            }
+            override fun onFailure(call: Call<OcrResponse>, t: Throwable) {
+                setLoading(false)
+                Toast.makeText(this@MainActivity, "Connection Failed", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    private fun runRestoration(text: String) {
+        setLoading(true)
+        // 1. Change Callback type to ResponseBody
+        api.restoreText(RestoreRequest(text)).enqueue(object : Callback<ResponseBody> {
+            override fun onResponse(call: Call<ResponseBody>, response: Response<ResponseBody>) {
+                setLoading(false)
+                if (response.isSuccessful && response.body() != null) {
+                    try {
+                        // 2. Get the RAW string from the server
+                        val rawResponse = response.body()!!.string()
+
+                        // 3. Check if it's JSON {"prediction": "..."} or just "..."
+                        val resultText = if (rawResponse.trim().startsWith("{")) {
+                            // It is JSON -> Parse it
+                            val jsonObject = JSONObject(rawResponse)
+                            jsonObject.getString("prediction")
+                        } else {
+                            // It is a plain String (or quoted string) -> Clean it
+                            rawResponse.replace("\"", "") // Remove quotes if present
+                        }
+
+                        // 4. Show Result
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Restoration Result")
+                            .setMessage(resultText)
+                            .setPositiveButton("Replace") { _, _ -> etOcrText.setText(resultText) }
+                            .setNegativeButton("Copy") { _, _ ->
+                                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("Restored", resultText)
+                                clipboard.setPrimaryClip(clip)
+                            }
+                            .setNeutralButton("Cancel", null)
+                            .show()
+
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, "Parse Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Toast.makeText(this@MainActivity, "Server Error: ${response.code()}", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
+                setLoading(false)
+                Toast.makeText(this@MainActivity, "Connection Failed: ${t.message}", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
 }
+
+// --- API INTERFACE ---
+
+interface ApiService {
+
+    @POST("/papytwin")
+    fun scanPapyTwin(@Body request: OcrRequest): Call<OcrResponse>
+
+    @POST("/restore")
+    fun restoreText(@Body request: RestoreRequest): Call<ResponseBody>
+}
+
+data class OcrRequest(val image: String)
+data class OcrResponse(val text: String)
+data class RestoreRequest(val text: String)
+data class RestoreResponse(val prediction: String)

@@ -13,6 +13,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_set_server_url"
+        android:title="Set Aeneas Server URL"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_ocr_mode"
         android:title="Use Google Online OCR"
         android:checkable="true"
