@@ -18,9 +18,9 @@ The scan button allows you to take a photo or load a local image for OCR (app ca
 
 If you no longer need the image, you can click the "X" in the upper right corner of the image. You can also save the image if you want.
 
-The databases are stored at Android/Data/com.example.latininscription/files
-
 You can choose offline translation, online translation and AI smart translation. Offline translation is available via Google Translate App's offline mode. Install Google Translate on your phone and download Latin and Greek language packs. AI translation is offered by gemini, and uses gemini api key (from ai studio, currently 15 requests per minute for gree tier). I have also added the api offered by ChatAnywhere project, which offers access to GPT 3.5 or 4.0. You can choose one mode of translation in the setting menu (in the top left of the window).
+
+Aeneas AI model for restoring damaged inscriptions is integrated. When you have loaded and ocred a picture, but are faced with uncertainties, click the "pencil" button to use Aeneas model for restoration (running on kaggle, ngrok auth keys and domains needed).
 
 ![Screenshot_2025-12-18-10-45-39-99_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/873556fa-822a-48bc-8929-9718fa7e2881)
 ![Screenshot_2025-12-18-10-45-35-61_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/4c6c7a5d-17b2-41ff-932b-bf68b6dea086)
