@@ -22,12 +22,12 @@ You can choose offline translation, online translation and AI smart translation.
 
 Aeneas AI model for restoring damaged inscriptions is integrated. When you have loaded and ocred a picture, but are faced with uncertainties, click the "pencil" button to use Aeneas model for restoration (running on kaggle, ngrok auth keys and domains needed).
 
-![IMG_20251224_174002](https://github.com/user-attachments/assets/09d8c81e-deb1-4f2f-ac2c-521ed4dea2ee)
-![Screenshot_2025-12-25-10-05-11-34](https://github.com/user-attachments/assets/dc2dea2d-c04a-4537-8545-bcbbc03ad88c)
-![Screenshot_2025-12-25-18-41-04-85_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/f167d759-e0d1-4385-9178-9acdd2fc2537)
-![Screenshot_2025-12-25-18-41-17-14_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/34e135de-8ed8-4e2e-bba8-f825d171952c)
-![Screenshot_2025-12-25-18-41-21-45_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/bf8f6600-a036-47aa-be24-9e3e787887af)
-![Screenshot_2025-12-25-18-41-26-69_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/62cbb839-4824-416d-b621-cb4df4aa73f3)
-![Screenshot_2025-12-25-18-42-10-08_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/9dc502e9-31da-4ef0-a8cd-3b1d4c523cbe)
-![Screenshot_2025-12-24-14-41-47-42_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/c53f4f04-6c0c-40bb-94b7-27d59ce472b5)
+![Screenshot_2025-12-25-18-41-04-85_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/8f8094b6-4d04-4d1c-8daa-10c2e648d308)
+![Screenshot_2025-12-25-18-41-17-14_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/b7e3b968-2f50-4109-9d0b-6d8c0bd5aa8a)
+![Screenshot_2025-12-25-18-42-10-08_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/2b052fe5-638b-4fbf-89b8-92672a7cfe25)
+![Screenshot_2025-12-25-18-41-21-45_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/a18540aa-f623-4d94-ab64-205b3f9c7022)
+![Screenshot_2025-12-25-18-41-26-69_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/46b856dd-2dd6-41b4-9170-82a2fea3073f)
 
+![Screenshot_2025-12-25-10-05-11-34](https://github.com/user-attachments/assets/0b92446c-2f6e-4e9d-88a2-d072863f285e)
+![IMG_20251224_174033](https://github.com/user-attachments/assets/a5536167-26b0-4a8e-bfe4-a6caa7173b8e)
+![Screenshot_2025-12-25-19-25-51-28](https://github.com/user-attachments/assets/13c7fe29-98c5-4c30-8009-23361bcd5246)
