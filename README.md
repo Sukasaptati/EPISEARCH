@@ -18,18 +18,16 @@ The scan button allows you to take a photo or load a local image for OCR (app ca
 
 If you no longer need the image, you can click the "X" in the upper right corner of the image. You can also save the image if you want.
 
-The databases are stored at Android/Data/com.example.latininscription/files
-
 You can choose offline translation, online translation and AI smart translation. Offline translation is available via Google Translate App's offline mode. Install Google Translate on your phone and download Latin and Greek language packs. AI translation is offered by gemini, and uses gemini api key (from ai studio, currently 15 requests per minute for gree tier). I have also added the api offered by ChatAnywhere project, which offers access to GPT 3.5 or 4.0. You can choose one mode of translation in the setting menu (in the top left of the window).
 
-![Screenshot_2025-12-18-10-45-39-99_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/873556fa-822a-48bc-8929-9718fa7e2881)
-![Screenshot_2025-12-18-10-45-35-61_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/4c6c7a5d-17b2-41ff-932b-bf68b6dea086)
-![Screenshot_2025-12-18-10-43-55-88_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/1414811b-75f4-42e7-abd4-1d566cc9a6be)
-![Screenshot_2025-12-15-12-40-03-93_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/2a77f211-9176-4972-b5f3-94f06b46512e)
-![Screenshot_2025-12-15-12-39-31-80_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/e7ce2796-6dfe-437b-b13d-f25b52638032)
-![Screenshot_2025-12-15-12-39-24-52_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/c53f29fc-8626-457a-b41e-8d98fe68981b)
-![Screenshot_2025-12-15-12-39-12-48_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/d7a3b932-5c87-4cef-93b4-3bafa64bc88a)
-![Screenshot_2025-12-15-12-38-00-25_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/1439c319-c606-49df-bd62-557f5180e291)
-![Screenshot_2025-12-16-19-08-31-07_7a5391456ddf15713cd09dfbd75e8325](https://github.com/user-attachments/assets/91c90f73-d26d-4655-aed7-50d76cd8214a)
-![Screenshot_2025-12-16-19-07-44-40_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/4b6b5a53-8b95-4028-9dca-2a47d64d64ac)
-![Screenshot_2025-12-16-19-07-35-93_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/99014ffe-3c0e-4a7c-a356-a85012814c74)
+Aeneas AI model for restoring damaged inscriptions is integrated. When you have loaded and ocred a picture, but are faced with uncertainties, click the "pencil" button to use Aeneas model for restoration (running on kaggle, ngrok auth keys and domains needed).
+
+![Screenshot_2025-12-25-18-41-04-85_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/8f8094b6-4d04-4d1c-8daa-10c2e648d308)
+![Screenshot_2025-12-25-18-41-17-14_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/b7e3b968-2f50-4109-9d0b-6d8c0bd5aa8a)
+![Screenshot_2025-12-25-18-42-10-08_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/2b052fe5-638b-4fbf-89b8-92672a7cfe25)
+![Screenshot_2025-12-25-18-41-21-45_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/a18540aa-f623-4d94-ab64-205b3f9c7022)
+![Screenshot_2025-12-25-18-41-26-69_574837b0a387c55e346b4d9fa01d2246](https://github.com/user-attachments/assets/46b856dd-2dd6-41b4-9170-82a2fea3073f)
+
+![Screenshot_2025-12-25-10-05-11-34](https://github.com/user-attachments/assets/0b92446c-2f6e-4e9d-88a2-d072863f285e)
+![IMG_20251224_174033](https://github.com/user-attachments/assets/a5536167-26b0-4a8e-bfe4-a6caa7173b8e)
+![Screenshot_2025-12-25-19-25-51-28](https://github.com/user-attachments/assets/13c7fe29-98c5-4c30-8009-23361bcd5246)
