@@ -26,179 +26,175 @@
             android:layout_gravity="center" />
     </androidx.appcompat.widget.Toolbar>
 
-    <ScrollView
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:fillViewport="true">
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="12dp">
-                <Spinner
-                    android:id="@+id/spinnerDatabase"
-                    android:layout_width="0dp"
-                    android:layout_height="50dp"
-                    android:layout_weight="1"
-                    android:background="@android:drawable/btn_dropdown"
-                    android:layout_marginEnd="8dp" />
-                <Button
-                    android:id="@+id/btnOcr"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="SCAN" />
-            </LinearLayout>
-
-            <EditText
-                android:id="@+id/etInclude"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Include (&amp;&amp;)"
-                android:inputType="text"
-                android:minHeight="48dp" />
-
-            <EditText
-                android:id="@+id/etExclude"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Exclude (&amp;&amp;)"
-                android:inputType="text"
-                android:minHeight="48dp"
-                android:layout_marginBottom="12dp"/>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center">
-                <Button
-                    android:id="@+id/btnSearch"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Search"
-                    android:layout_marginEnd="4dp"/>
-                <Button
-                    android:id="@+id/btnSave"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="SAVE"
-                    android:layout_marginStart="4dp"/>
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/tvStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Ready"
-                android:gravity="center"
-                android:padding="8dp"
-                android:textColor="#666666"/>
-
-            <ProgressBar
-                android:id="@+id/progressBar"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+            <Spinner
+                android:id="@+id/spinnerDatabase"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:background="@android:drawable/btn_dropdown"
+                android:layout_marginEnd="8dp" />
+            <Button
+                android:id="@+id/btnOcr"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:visibility="gone" />
+                android:text="SCAN" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/etInclude"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Include (&amp;&amp;)"
+            android:inputType="text"
+            android:minHeight="48dp" />
+
+        <EditText
+            android:id="@+id/etExclude"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Exclude (&amp;&amp;)"
+            android:inputType="text"
+            android:minHeight="48dp"
+            android:layout_marginBottom="12dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+            <Button
+                android:id="@+id/btnSearch"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Search"
+                android:layout_marginEnd="4dp"/>
+            <Button
+                android:id="@+id/btnSave"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="SAVE"
+                android:layout_marginStart="4dp"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ready"
+            android:gravity="center"
+            android:padding="8dp"
+            android:textColor="#666666"/>
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/layoutOcrResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:background="@drawable/box_border"
+            android:padding="8dp"
+            android:layout_marginBottom="12dp">
+
+            <ImageView
+                android:id="@+id/ivPreview"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:adjustViewBounds="true"
+                android:scaleType="fitCenter"
+                android:minHeight="200dp" />
 
             <LinearLayout
-                android:id="@+id/layoutOcrResult"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:visibility="gone"
-                android:background="@drawable/box_border"
-                android:padding="8dp"
-                android:layout_marginBottom="12dp">
+                android:orientation="horizontal"
+                android:gravity="end">
 
-                <ImageView
-                    android:id="@+id/ivPreview"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:adjustViewBounds="true"
-                    android:scaleType="fitCenter"
-                    android:minHeight="200dp" />
+                <ImageButton
+                    android:id="@+id/btnSpecialistScan"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@android:drawable/ic_menu_search"
+                    android:background="?attr/selectableItemBackground"
+                    android:tooltipText="PapyTwin Scan"/>
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="end">
+                <ImageButton
+                    android:id="@+id/btnRestore"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@android:drawable/ic_menu_edit"
+                    android:background="?attr/selectableItemBackground"
+                    android:tooltipText="Restore with Aeneas AI"/>
 
-                    <ImageButton
-                        android:id="@+id/btnSpecialistScan"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:src="@android:drawable/ic_menu_search"
-                        android:background="?attr/selectableItemBackground"
-                        android:tooltipText="PapyTwin Scan"/>
-                    
-                    <ImageButton
-                        android:id="@+id/btnRestore"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:src="@android:drawable/ic_menu_edit"
-                        android:background="?attr/selectableItemBackground"
-                        android:tooltipText="Restore with Aeneas AI"/>
-
-                    <ImageButton
-                        android:id="@+id/btnSaveImage"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:src="@android:drawable/ic_menu_save"
-                        android:background="?attr/selectableItemBackground"/>
-                    <ImageButton
-                        android:id="@+id/btnTranslate"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:src="@android:drawable/ic_menu_sort_by_size"
-                        android:background="?attr/selectableItemBackground"/>
-                    <ImageButton
-                        android:id="@+id/btnCloseOcr"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:src="@android:drawable/ic_menu_close_clear_cancel"
-                        android:background="?attr/selectableItemBackground"/>
-                </LinearLayout>
-
-                <EditText
-                    android:id="@+id/etOcrText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:padding="8dp"
-                    android:background="@null"
-                    android:hint="Scanned text (Tap to edit)..."
-                    android:inputType="textMultiLine|textNoSuggestions"
-                    android:textColor="#000000"
-                    android:textSize="16sp" />
+                <ImageButton
+                    android:id="@+id/btnSaveImage"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@android:drawable/ic_menu_save"
+                    android:background="?attr/selectableItemBackground"/>
+                <ImageButton
+                    android:id="@+id/btnTranslate"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@android:drawable/ic_menu_sort_by_size"
+                    android:background="?attr/selectableItemBackground"/>
+                <ImageButton
+                    android:id="@+id/btnCloseOcr"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:src="@android:drawable/ic_menu_close_clear_cancel"
+                    android:background="?attr/selectableItemBackground"/>
             </LinearLayout>
-            
-            <TextView
-                android:id="@+id/tvTranslation"
+
+            <EditText
+                android:id="@+id/etOcrText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:padding="8dp"
-                android:background="#E3F2FD"
-                android:textIsSelectable="true"
-                android:visibility="gone"
-                android:textColor="#000000" />
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/rvResults"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:nestedScrollingEnabled="false"/>
-
+                android:background="@null"
+                android:hint="Scanned text (Tap to edit)..."
+                android:inputType="textMultiLine|textNoSuggestions"
+                android:textColor="#000000"
+                android:textSize="16sp" />
         </LinearLayout>
-    </ScrollView>
+
+        <TextView
+            android:id="@+id/tvTranslation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:background="#E3F2FD"
+            android:textIsSelectable="true"
+            android:visibility="gone"
+            android:textColor="#000000" />
+
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvResults"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollbars="vertical" />
+
 </LinearLayout>
