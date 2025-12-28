@@ -26,8 +26,8 @@ from fastapi import FastAPI, Request
 import jax
 import haiku as hk
 
-MY_TOKEN = "2cMNQ4VIW1T5ntbN6qzhVUL9kSA_7EgJoydsBJihNm3C3ePuH"
-STATIC_DOMAIN = "nonwarrantably-unlovely-jina.ngrok-free.dev"
+MY_TOKEN = "YOUR NGROK AUTH TOKEN"
+STATIC_DOMAIN = "YOUR NGROK DOMAIN"
 
 # --- 4. CLONE REPO ---
 print("⏳ Cloning DeepMind Repo...")
