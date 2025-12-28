@@ -1,3 +1,6 @@
+# =================================================================
+#  FINAL SERVER (DEBUG MODE: VISIBLE OUTPUT)
+# =================================================================
 import os
 import sys
 import subprocess
