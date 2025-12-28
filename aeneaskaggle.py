@@ -1,6 +1,3 @@
-# =================================================================
-#  FINAL SERVER (DEBUG MODE: VISIBLE OUTPUT)
-# =================================================================
 import os
 import sys
 import subprocess
@@ -26,8 +23,8 @@ from fastapi import FastAPI, Request
 import jax
 import haiku as hk
 
-MY_TOKEN = "YOUR NGROK TOKEN"
-STATIC_DOMAIN = "YOUR NGROK DOMAIN"
+MY_TOKEN = "2cMNQ4VIW1T5ntbN6qzhVUL9kSA_7EgJoydsBJihNm3C3ePuH"
+STATIC_DOMAIN = "nonwarrantably-unlovely-jina.ngrok-free.dev"
 
 # --- 4. CLONE REPO ---
 print("⏳ Cloning DeepMind Repo...")
@@ -99,14 +96,19 @@ async def handle_request(request: Request):
         # Parse result
         res_json = restoration.json()
         if isinstance(res_json, str): res_json = json.loads(res_json)
-        prediction = res_json.get("predictions", ["No result"])[0]
+            
+        # Get all predictions instead of just [0]
+        all_preds = res_json.get("predictions", ["No result"])
         
-        # --- THE MISSING LOG ---
-        print(f"   ✅ Inference Finished!")
-        print(f"   📤 SENDING TO PHONE: {prediction}") 
-        # ---------------------
+        # Format as a list string:
+        # 1) Option A
+        # 2) Option B
+        formatted_list = ""
+        for i, pred in enumerate(all_preds):
+            formatted_list += f"{i+1}) {pred}\n"
         
-        return {"prediction": prediction}
+        print(f"   ✅ Finished! Sending {len(all_preds)} options.")
+        return {"prediction": formatted_list.strip()}
         
     except Exception as e:
         print(f"   ❌ SERVER ERROR: {e}")
